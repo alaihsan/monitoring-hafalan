@@ -40,9 +40,11 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
         window.print();
     };
 
-    const isLargeVerseCount = totalVerses >= 40;
-    const tableFontSize = isLargeVerseCount ? 'text-[8px]' : 'text-[9.5px]';
-    const headerFontSize = isLargeVerseCount ? 'text-[7.5px]' : 'text-[9px]';
+    const isLargeVerseCount = totalVerses >= 35;
+    const isLargeStudentCount = students.length >= 20;
+
+    const tableFontSize = (isLargeVerseCount || isLargeStudentCount) ? 'text-[8px]' : 'text-[9.5px]';
+    const headerFontSize = (isLargeVerseCount || isLargeStudentCount) ? 'text-[7px]' : 'text-[8.5px]';
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto">
@@ -147,9 +149,9 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                     <div className="text-xs font-semibold text-muted-foreground mb-2">Pratinjau Dokumen Cetak:</div>
                     
                     {/* Printable Area */}
-                    <div id="printable-area" className="bg-white text-slate-900 p-6 rounded-xl border border-slate-300 shadow-inner font-sans text-xs space-y-4 w-full">
+                    <div id="printable-area" className="bg-white text-slate-900 p-6 rounded-xl border border-slate-300 shadow-inner font-sans text-xs space-y-3 w-full">
                         {/* Kop Laporan Header */}
-                        <div className="border-b-2 border-slate-900 pb-3 text-center space-y-0.5">
+                        <div className="print-kop border-b-2 border-slate-900 pb-2 text-center space-y-0.5">
                             <h1 className="text-base font-black uppercase tracking-wider text-slate-900">
                                 {schoolSettings.schoolName}
                             </h1>
@@ -162,7 +164,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                         </div>
 
                         {/* Metadata Information */}
-                        <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-[11px]">
+                        <div className="print-meta grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-[11px]">
                             <div className="space-y-0.5">
                                 <div><span className="font-semibold text-slate-600">Rombongan Belajar:</span> <strong className="text-slate-900">{currentClass.name}</strong></div>
                                 <div><span className="font-semibold text-slate-600">Wali Kelas:</span> <strong className="text-slate-900">{currentClass.waliKelas}</strong></div>
@@ -175,13 +177,13 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                             </div>
                         </div>
 
-                        {/* Matrix Table for Print: Dynamic neat student name column formatting */}
-                        <div className="w-full overflow-x-auto">
+                        {/* Matrix Table for Print */}
+                        <div className="w-full overflow-x-auto print:overflow-visible">
                             <table className={`w-full border-collapse border border-slate-900 ${tableFontSize}`}>
                                 <thead>
                                     <tr className="bg-slate-200 text-slate-900">
                                         <th className="border border-slate-900 p-1 text-center w-6 font-bold">No</th>
-                                        <th className="border border-slate-900 px-3 py-1 text-left font-bold whitespace-nowrap">Nama Murid</th>
+                                        <th className="border border-slate-900 px-2 py-1 text-left font-bold whitespace-nowrap">Nama Murid</th>
                                         {verseArray.map((v) => (
                                             <th key={v} className={`border border-slate-900 p-0 text-center font-bold ${headerFontSize}`}>
                                                 {v}
@@ -199,7 +201,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                                         return (
                                             <tr key={student.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}>
                                                 <td className="border border-slate-900 p-1 text-center font-medium">{idx + 1}</td>
-                                                <td className="border border-slate-900 px-3 py-1 font-bold whitespace-nowrap text-left text-slate-900">{student.name}</td>
+                                                <td className="border border-slate-900 px-2 py-1 font-bold whitespace-nowrap text-left text-slate-900">{student.name}</td>
                                                 {verseArray.map((v) => {
                                                     const isChecked = completedVerses.includes(v);
                                                     return (
@@ -216,14 +218,14 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                             </table>
                         </div>
 
-                        {/* Signatures Section: 2 Columns Only (Guru Mapel Al-Qur'an & Wali Kelas) */}
-                        <div className="pt-6 grid grid-cols-2 gap-8 text-center text-xs">
-                            <div className="space-y-10">
+                        {/* Signatures Section: 2 Columns Only */}
+                        <div className="print-signatures pt-3 grid grid-cols-2 gap-8 text-center text-xs">
+                            <div className="flex flex-col justify-between h-20">
                                 <p className="font-semibold">Mengetahui,<br/>Wali Kelas {currentClass.name}</p>
                                 <p className="font-bold underline">{currentClass.waliKelas}</p>
                             </div>
-                            <div className="space-y-10">
-                                <p className="font-semibold">Guru Mapel Al-Qur'an,</p>
+                            <div className="flex flex-col justify-between h-20">
+                                <p className="font-semibold"><br/>Guru Mapel Al-Qur'an,</p>
                                 <p className="font-bold underline">{schoolSettings.quranTeacherName}</p>
                             </div>
                         </div>
@@ -235,32 +237,65 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
             <style dangerouslySetInnerHTML={{
                 __html: `
                 @media print {
+                    html, body {
+                        height: 100% !important;
+                        max-height: 100vh !important;
+                        overflow: hidden !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: #ffffff !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
                     body * {
-                        visibility: hidden;
+                        visibility: hidden !important;
                     }
                     #printable-area, #printable-area * {
-                        visibility: visible;
+                        visibility: visible !important;
                     }
                     #printable-area {
-                        position: absolute;
-                        left: 0;
-                        top: 0;
+                        position: fixed !important;
+                        left: 0 !important;
+                        top: 0 !important;
                         width: 100% !important;
                         max-width: 100% !important;
+                        height: 100% !important;
+                        max-height: 100vh !important;
                         border: none !important;
                         box-shadow: none !important;
                         padding: 0 !important;
                         margin: 0 !important;
+                        overflow: hidden !important;
+                        break-inside: avoid !important;
+                        page-break-inside: avoid !important;
+                        page-break-after: avoid !important;
+                    }
+                    .print-kop {
+                        padding-bottom: 4px !important;
+                        margin-bottom: 4px !important;
+                    }
+                    .print-meta {
+                        padding: 4px 8px !important;
+                        margin-bottom: 4px !important;
+                        font-size: 10px !important;
                     }
                     table {
                         width: 100% !important;
+                        border-collapse: collapse !important;
                     }
                     th, td {
-                        white-space: nowrap;
+                        padding: 1.5px 2px !important;
+                        line-height: 1.15 !important;
+                    }
+                    .print-signatures {
+                        padding-top: 6px !important;
+                        margin-top: 4px !important;
+                        break-inside: avoid !important;
+                        page-break-inside: avoid !important;
                     }
                     @page {
                         size: ${paperSize === 'F4' ? '215mm 330mm' : 'A4'} ${orientation};
-                        margin: 6mm 8mm;
+                        margin: 4mm 6mm;
                     }
                 }
             `}} />
