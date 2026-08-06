@@ -21,11 +21,25 @@ import { PrintReportModal } from '@/components/hafalan/PrintReportModal';
 import { BookOpenCheck, Printer, Users, Award, Percent, AlertOctagon, Lock, ArrowLeft, Calendar, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export default function HafalanSharePage() {
-    const [classes, setClasses] = React.useState<ClassInfo[]>(CLASSES);
-    const [students, setStudents] = React.useState<Student[]>([]);
-    const [progress, setProgress] = React.useState<ProgressData>({});
-    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>({ schoolName: '', quranTeacherName: '' });
+interface SharePageProps {
+    initialClasses?: ClassInfo[];
+    initialStudents?: Student[];
+    initialProgress?: ProgressData;
+    initialSettings?: SchoolSettings;
+}
+
+export default function HafalanSharePage({
+    initialClasses,
+    initialStudents,
+    initialProgress,
+    initialSettings,
+}: SharePageProps) {
+    const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
+    const [students, setStudents] = React.useState<Student[]>(initialStudents || []);
+    const [progress, setProgress] = React.useState<ProgressData>(initialProgress || {});
+    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>(
+        initialSettings || { schoolName: '', quranTeacherName: '' }
+    );
 
     const [selectedClassId, setSelectedClassId] = React.useState<string>('7A');
     const [selectedSemester, setSelectedSemester] = React.useState<number>(1);
@@ -36,6 +50,8 @@ export default function HafalanSharePage() {
     const [expiredDateText, setExpiredDateText] = React.useState<string>('');
 
     React.useEffect(() => {
+        const classList = (initialClasses && initialClasses.length > 0) ? initialClasses : CLASSES;
+
         if (typeof window !== 'undefined') {
             const urlParams = new URLSearchParams(window.location.search);
             const classParam = urlParams.get('class');
@@ -50,21 +66,21 @@ export default function HafalanSharePage() {
             }
 
             // Strictly lock class to the share link parameter
-            if (classParam && CLASSES.some(c => c.id === classParam)) {
+            if (classParam && classList.some((c) => c.id === classParam)) {
                 setSelectedClassId(classParam);
             }
         }
 
-        const loadedStds = loadSavedStudents();
-        const savedClasses = loadSavedClasses();
-        const savedProg = loadSavedProgress(loadedStds);
-        const settings = loadSchoolSettings();
+        const loadedStds = (initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents();
+        const savedClasses = (initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses();
+        const savedProg = initialProgress ? initialProgress : loadSavedProgress(loadedStds);
+        const settings = (initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings();
 
         setStudents(loadedStds);
         setClasses(savedClasses);
         setProgress(savedProg);
         setSchoolSettings(settings);
-    }, []);
+    }, [initialClasses, initialStudents, initialProgress, initialSettings]);
 
     const currentClass = React.useMemo(() => {
         return classes.find((c) => c.id === selectedClassId) || classes[0];

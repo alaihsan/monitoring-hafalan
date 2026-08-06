@@ -32,12 +32,27 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-export default function HafalanMonitoringPage() {
+interface IndexPageProps {
+    initialClasses?: ClassInfo[];
+    initialStudents?: Student[];
+    initialProgress?: ProgressData;
+    initialSettings?: SchoolSettings;
+    initialHistory?: any[];
+}
+
+export default function HafalanMonitoringPage({
+    initialClasses,
+    initialStudents,
+    initialProgress,
+    initialSettings,
+}: IndexPageProps) {
     // 1. Core State
-    const [classes, setClasses] = React.useState<ClassInfo[]>(CLASSES);
-    const [students, setStudents] = React.useState<Student[]>([]);
-    const [progress, setProgress] = React.useState<ProgressData>({});
-    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>({ schoolName: '', quranTeacherName: '' });
+    const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
+    const [students, setStudents] = React.useState<Student[]>(initialStudents || []);
+    const [progress, setProgress] = React.useState<ProgressData>(initialProgress || {});
+    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>(
+        initialSettings || { schoolName: '', quranTeacherName: '' }
+    );
 
     const [selectedClassId, setSelectedClassId] = React.useState<string>('7A');
     const [selectedSemester, setSelectedSemester] = React.useState<number>(1);
@@ -49,18 +64,18 @@ export default function HafalanMonitoringPage() {
     // Modals
     const [isPrintModalOpen, setIsPrintModalOpen] = React.useState<boolean>(false);
 
-    // Initial Load & LocalStorage Hydration
+    // Initial Load & LocalStorage Hydration / Props Sync
     React.useEffect(() => {
-        const loadedStds = loadSavedStudents();
-        const savedClasses = loadSavedClasses();
-        const savedProg = loadSavedProgress(loadedStds);
-        const settings = loadSchoolSettings();
+        const loadedStds = (initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents();
+        const savedClasses = (initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses();
+        const savedProg = initialProgress ? initialProgress : loadSavedProgress(loadedStds);
+        const settings = (initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings();
 
         setStudents(loadedStds);
         setClasses(savedClasses);
         setProgress(savedProg);
         setSchoolSettings(settings);
-    }, []);
+    }, [initialClasses, initialStudents, initialProgress, initialSettings]);
 
     // Derived Selected Class & Surah
     const currentClass = React.useMemo(() => {
@@ -100,11 +115,12 @@ export default function HafalanMonitoringPage() {
         };
     }, [currentClassStudents, progress, currentSurah]);
 
-    // Handlers with Activity Logging
-    const handleToggleVerse = (studentId: string, surahId: string, verseNum: number) => {
+    // Handlers with Activity Logging & DB API Sync
+    const handleToggleVerse = async (studentId: string, surahId: string, verseNum: number) => {
         if (isViewOnly) return;
         const studentObj = students.find((s) => s.id === studentId);
 
+        // Optimistic UI Update
         setProgress((prev) => {
             const studentProg = prev[studentId] || {};
             const surahProg = studentProg[surahId] || [];
@@ -148,11 +164,37 @@ export default function HafalanMonitoringPage() {
             saveProgressToStorage(next);
             return next;
         });
+
+        // API DB Sync
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/toggle-verse', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({
+                    studentId,
+                    surahId,
+                    verseNum,
+                    surahName: currentSurah.name,
+                }),
+            });
+            const data = await res.json();
+            if (data.success && data.progress) {
+                setProgress(data.progress);
+                saveProgressToStorage(data.progress);
+            }
+        } catch (e) {
+            console.error('Failed to sync toggleVerse to MySQL', e);
+        }
     };
 
-    const handleToggleColumnVerse = (surahId: string, verseNum: number, check: boolean) => {
+    const handleToggleColumnVerse = async (surahId: string, verseNum: number, check: boolean) => {
         if (isViewOnly) return;
 
+        // Optimistic UI Update
         setProgress((prev) => {
             const next = { ...prev };
 
@@ -200,6 +242,31 @@ export default function HafalanMonitoringPage() {
             saveProgressToStorage(next);
             return next;
         });
+
+        // API DB Sync
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/toggle-column-verse', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({
+                    classId: currentClass.id,
+                    surahId,
+                    verseNum,
+                    surahName: currentSurah.name,
+                }),
+            });
+            const data = await res.json();
+            if (data.success && data.progress) {
+                setProgress(data.progress);
+                saveProgressToStorage(data.progress);
+            }
+        } catch (e) {
+            console.error('Failed to sync toggleColumnVerse to MySQL', e);
+        }
     };
 
     const handleEditWaliKelas = (classId: string, newWaliKelas: string) => {

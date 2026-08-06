@@ -23,15 +23,19 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-export default function HafalanHistoryPage() {
-    const [logs, setLogs] = React.useState<HistoryLogItem[]>([]);
+interface HistoryPageProps {
+    initialHistory?: HistoryLogItem[];
+}
+
+export default function HafalanHistoryPage({ initialHistory }: HistoryPageProps) {
+    const [logs, setLogs] = React.useState<HistoryLogItem[]>(initialHistory || []);
     const [searchQuery, setSearchQuery] = React.useState('');
     const [actionFilter, setActionFilter] = React.useState<string>('ALL');
     const [classFilter, setClassFilter] = React.useState<string>('ALL');
 
     React.useEffect(() => {
-        setLogs(loadHistoryLogs());
-    }, []);
+        setLogs((initialHistory && initialHistory.length > 0) ? initialHistory : loadHistoryLogs());
+    }, [initialHistory]);
 
     // Filter logs
     const filteredLogs = logs.filter((log) => {

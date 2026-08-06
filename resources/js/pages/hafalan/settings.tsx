@@ -20,6 +20,7 @@ import {
 } from '@/data/hafalan-data';
 
 import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
+import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,14 +37,23 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-export default function HafalanSettingsPage() {
-    const [schoolSettings, setSchoolSettingsState] = React.useState<SchoolSettings>({
-        schoolName: '',
-        quranTeacherName: '',
-    });
+interface SettingsPageProps {
+    initialSettings?: SchoolSettings;
+    initialClasses?: ClassInfo[];
+    initialStudents?: Student[];
+}
 
-    const [classes, setClasses] = React.useState<ClassInfo[]>(CLASSES);
-    const [allStudents, setAllStudents] = React.useState<Student[]>([]);
+export default function HafalanSettingsPage({
+    initialSettings,
+    initialClasses,
+    initialStudents,
+}: SettingsPageProps) {
+    const [schoolSettings, setSchoolSettingsState] = React.useState<SchoolSettings>(
+        initialSettings || { schoolName: '', quranTeacherName: '' }
+    );
+
+    const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
+    const [allStudents, setAllStudents] = React.useState<Student[]>(initialStudents || []);
     const [savedNotification, setSavedNotification] = React.useState<string | null>(null);
 
     // Selected Class for CRUD & Import
@@ -59,6 +69,7 @@ export default function HafalanSettingsPage() {
     // Delete Modal state
     const [studentToDelete, setStudentToDelete] = React.useState<Student | null>(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = React.useState(false);
+    const [isClearClassModalOpen, setIsClearClassModalOpen] = React.useState(false);
 
     // Importer text state
     const [importText, setImportText] = React.useState<string>('');
@@ -69,10 +80,10 @@ export default function HafalanSettingsPage() {
     const excelFileInputRef = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
-        setSchoolSettingsState(loadSchoolSettings());
-        setClasses(loadSavedClasses());
-        setAllStudents(loadSavedStudents());
-    }, []);
+        setSchoolSettingsState((initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings());
+        setClasses((initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses());
+        setAllStudents((initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents());
+    }, [initialSettings, initialClasses, initialStudents]);
 
     const showToast = (msg: string) => {
         setSavedNotification(msg);
@@ -82,7 +93,7 @@ export default function HafalanSettingsPage() {
     const currentCrudClass = classes.find(c => c.id === selectedCrudClassId);
     const currentClassName = currentCrudClass ? currentCrudClass.name : selectedCrudClassId;
 
-    const handleSaveSchoolInfo = (e: React.FormEvent) => {
+    const handleSaveSchoolInfo = async (e: React.FormEvent) => {
         e.preventDefault();
         saveSchoolSettings(schoolSettings);
         addHistoryLog({
@@ -92,6 +103,21 @@ export default function HafalanSettingsPage() {
             action: 'UPDATE_SETTINGS',
             actionLabel: 'Ubah Pengaturan Identitas Sekolah & Guru Mapel',
         });
+
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            await fetch('/api/hafalan/settings', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify(schoolSettings),
+            });
+        } catch (err) {
+            console.error('Failed to sync school settings to MySQL', err);
+        }
+
         showToast('Pengaturan Sekolah & Guru Mapel berhasil disimpan!');
     };
 
@@ -108,15 +134,14 @@ export default function HafalanSettingsPage() {
         return allStudents.filter((s) => s.classId === selectedCrudClassId);
     }, [allStudents, selectedCrudClassId]);
 
-    // Student CRUD Handlers (FIXED: Guarantees appending to full 12-class dataset!)
-    const handleAddStudent = (e: React.FormEvent) => {
+    // Student CRUD Handlers
+    const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newName.trim()) {
             alert('Nama murid tidak boleh kosong.');
             return;
         }
 
-        // Always read fresh dataset from storage or state to prevent missing other classes
         const currentDataset = loadSavedStudents();
         const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
 
@@ -132,7 +157,6 @@ export default function HafalanSettingsPage() {
         setAllStudents(updated);
         saveStudentsToStorage(updated);
 
-        // Log action
         addHistoryLog({
             studentName: newStudentObj.name,
             studentNisn: newStudentObj.nisn,
@@ -140,6 +164,32 @@ export default function HafalanSettingsPage() {
             action: 'ADD_STUDENT',
             actionLabel: 'Tambah Murid Baru',
         });
+
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/students', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({
+                    id: newStudentObj.id,
+                    nisn: newStudentObj.nisn,
+                    name: newStudentObj.name,
+                    gender: newStudentObj.gender,
+                    classId: newStudentObj.classId,
+                }),
+            });
+            const data = await res.json();
+            if (data.success && data.students) {
+                setAllStudents(data.students);
+                saveStudentsToStorage(data.students);
+            }
+        } catch (err) {
+            console.error('Failed to sync new student to MySQL', err);
+        }
 
         setNewNisn('');
         setNewName('');
@@ -152,7 +202,7 @@ export default function HafalanSettingsPage() {
         setEditName(st.name);
     };
 
-    const handleSaveEditStudent = (studentId: string) => {
+    const handleSaveEditStudent = async (studentId: string) => {
         if (!editName.trim()) {
             alert('Nama murid tidak boleh kosong.');
             return;
@@ -172,7 +222,8 @@ export default function HafalanSettingsPage() {
         saveStudentsToStorage(updated);
         setEditingStudentId(null);
 
-        // Log action
+        const targetStudent = updated.find(s => s.id === studentId);
+
         addHistoryLog({
             studentName: editName.trim(),
             studentNisn: editNisn.trim(),
@@ -181,10 +232,38 @@ export default function HafalanSettingsPage() {
             actionLabel: 'Edit Data Murid',
         });
 
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            if (targetStudent) {
+                const res = await fetch('/api/hafalan/students', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': csrfToken || '',
+                    },
+                    body: JSON.stringify({
+                        id: targetStudent.id,
+                        nisn: targetStudent.nisn,
+                        name: targetStudent.name,
+                        gender: targetStudent.gender,
+                        classId: targetStudent.classId,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success && data.students) {
+                    setAllStudents(data.students);
+                    saveStudentsToStorage(data.students);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to sync edited student to MySQL', err);
+        }
+
         showToast('Data murid berhasil diperbarui!');
     };
 
-    const handleConfirmDeleteStudent = (studentId: string) => {
+    const handleConfirmDeleteStudent = async (studentId: string) => {
         const currentDataset = loadSavedStudents();
         const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
         const deletedStudent = baseStudents.find(s => s.id === studentId);
@@ -203,7 +282,66 @@ export default function HafalanSettingsPage() {
             });
         }
 
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch(`/api/hafalan/students/${studentId}`, {
+                method: 'DELETE',
+                headers: {
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+            });
+            const data = await res.json();
+            if (data.success && data.students) {
+                setAllStudents(data.students);
+                saveStudentsToStorage(data.students);
+            }
+        } catch (err) {
+            console.error('Failed to sync student deletion to MySQL', err);
+        }
+
         showToast('Data murid berhasil dihapus!');
+    };
+
+    const handleConfirmClearClass = async (classId: string) => {
+        const updated = allStudents.filter((s) => s.classId !== classId);
+        setAllStudents(updated);
+        saveStudentsToStorage(updated);
+
+        addHistoryLog({
+            studentName: 'Seluruh Siswa',
+            studentNisn: '-',
+            className: currentClassName,
+            action: 'DELETE_STUDENT',
+            actionLabel: `Kosongkan Data Siswa & Hafalan ${currentClassName}`,
+        });
+
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/classes/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ classId }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (data.students) {
+                    setAllStudents(data.students);
+                    saveStudentsToStorage(data.students);
+                }
+                if (data.progress) {
+                    saveProgressToStorage(data.progress);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to clear class data in MySQL', err);
+        }
+
+        showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
     };
 
     // Importer text handler
@@ -229,7 +367,7 @@ export default function HafalanSettingsPage() {
         reader.readAsText(file);
     };
 
-    const handleApplyImportedStudents = () => {
+    const handleApplyImportedStudents = async () => {
         if (parsedPreview.length === 0) {
             alert('Tidak ada data murid yang siap diimpor.');
             return;
@@ -258,6 +396,28 @@ export default function HafalanSettingsPage() {
             action: 'IMPORT_STUDENTS',
             actionLabel: shouldOverwriteImport ? `Impor & Timpa Data (${parsedPreview.length} Siswa)` : `Impor & Gabung Data (${parsedPreview.length} Siswa)`,
         });
+
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/students/import', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({
+                    students: parsedPreview,
+                }),
+            });
+            const data = await res.json();
+            if (data.success && data.students) {
+                setAllStudents(data.students);
+                saveStudentsToStorage(data.students);
+            }
+        } catch (err) {
+            console.error('Failed to sync imported students to MySQL', err);
+        }
 
         setImportText('');
         setParsedPreview([]);
@@ -448,8 +608,16 @@ export default function HafalanSettingsPage() {
 
                     {/* Interactive CRUD Table for Active Class */}
                     <div className="space-y-3">
-                        <div className="flex items-center justify-between text-xs font-bold text-foreground">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold text-foreground">
                             <span>Daftar Murid {currentClassName} ({crudClassStudents.length} Siswa):</span>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => setIsClearClassModalOpen(true)}
+                                className="border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-xs h-8 self-start sm:self-auto"
+                            >
+                                <Trash2 className="size-3.5 mr-1.5" /> Kosongkan Data {currentClassName}
+                            </Button>
                         </div>
 
                         <div className="max-h-64 overflow-y-auto rounded-xl border border-border bg-background">
@@ -717,6 +885,16 @@ export default function HafalanSettingsPage() {
                 className={currentClassName}
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirmDelete={handleConfirmDeleteStudent}
+            />
+
+            {/* Clear Class Confirmation Modal */}
+            <ClearClassModal
+                isOpen={isClearClassModalOpen}
+                classId={selectedCrudClassId}
+                classNameStr={currentClassName}
+                studentCount={crudClassStudents.length}
+                onClose={() => setIsClearClassModalOpen(false)}
+                onConfirmClear={handleConfirmClearClass}
             />
         </AppLayout>
     );
