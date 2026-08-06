@@ -62,23 +62,23 @@ export const SURAHS: Surah[] = [
 ];
 
 export const CLASSES: ClassInfo[] = [
-    { id: '7A', name: 'Kelas 7A', grade: 7, section: 'A', waliKelas: 'Ustadz H. Ahmad Fauzi, S.Pd.I' },
-    { id: '7B', name: 'Kelas 7B', grade: 7, section: 'B', waliKelas: 'Ustadzah Hj. Nurul Hidayah, M.Pd' },
-    { id: '7C', name: 'Kelas 7C', grade: 7, section: 'C', waliKelas: 'Ustadz Muhammad Rizqi, S.Th.I' },
-    { id: '7D', name: 'Kelas 7D', grade: 7, section: 'D', waliKelas: 'Ustadzah Khadijah Azzahra, S.Pd' },
-    { id: '8A', name: 'Kelas 8A', grade: 8, section: 'A', waliKelas: 'Ustadz Abdurrahman, M.Ag' },
-    { id: '8B', name: 'Kelas 8B', grade: 8, section: 'B', waliKelas: 'Ustadzah Fatimah Azzahra, S.Pd.I' },
-    { id: '8C', name: 'Kelas 8C', grade: 8, section: 'C', waliKelas: 'Ustadz Ali Zainal Abidin, S.Pd' },
-    { id: '8D', name: 'Kelas 8D', grade: 8, section: 'D', waliKelas: 'Ustadzah Siti Aisha, M.Pd' },
-    { id: '9A', name: 'Kelas 9A', grade: 9, section: 'A', waliKelas: 'Ustadz H. Umar Faruq, S.Ag' },
-    { id: '9B', name: 'Kelas 9B', grade: 9, section: 'B', waliKelas: 'Ustadzah Maryam Jameelah, S.Pd.I' },
-    { id: '9C', name: 'Kelas 9C', grade: 9, section: 'C', waliKelas: 'Ustadz Usman Harun, M.Pd' },
-    { id: '9D', name: 'Kelas 9D', grade: 9, section: 'D', waliKelas: 'Ustadzah Asma\' Binti Abu Bakar, S.Pd' },
+    { id: '7A', name: 'Kelas 7A', grade: 7, section: 'A', waliKelas: '' },
+    { id: '7B', name: 'Kelas 7B', grade: 7, section: 'B', waliKelas: '' },
+    { id: '7C', name: 'Kelas 7C', grade: 7, section: 'C', waliKelas: '' },
+    { id: '7D', name: 'Kelas 7D', grade: 7, section: 'D', waliKelas: '' },
+    { id: '8A', name: 'Kelas 8A', grade: 8, section: 'A', waliKelas: '' },
+    { id: '8B', name: 'Kelas 8B', grade: 8, section: 'B', waliKelas: '' },
+    { id: '8C', name: 'Kelas 8C', grade: 8, section: 'C', waliKelas: '' },
+    { id: '8D', name: 'Kelas 8D', grade: 8, section: 'D', waliKelas: '' },
+    { id: '9A', name: 'Kelas 9A', grade: 9, section: 'A', waliKelas: '' },
+    { id: '9B', name: 'Kelas 9B', grade: 9, section: 'B', waliKelas: '' },
+    { id: '9C', name: 'Kelas 9C', grade: 9, section: 'C', waliKelas: '' },
+    { id: '9D', name: 'Kelas 9D', grade: 9, section: 'D', waliKelas: '' },
 ];
 
 export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
-    schoolName: 'SMP / MADRASAH TSANAWIYAH ISLAMIC SCHOOL',
-    quranTeacherName: 'Ustadz Pembimbing Tahfidz, S.Pd.I',
+    schoolName: 'NAMA SEKOLAH / MADRASAH',
+    quranTeacherName: 'NAMA GURU TAHFIDZ',
 };
 
 // Helper to get surah by grade and semester
@@ -87,83 +87,12 @@ export function getSurahForGradeAndSemester(grade: number, semester: number): Su
     return found || SURAHS[0];
 }
 
-const MALE_FIRST_NAMES = [
-    'Ahmad', 'Muhammad', 'Abdullah', 'Faris', 'Fikri', 'Ibrahim', 'Yusuf', 'Hamzah',
-    'Raihan', 'Zaid', 'Bilal', 'Umar', 'Ali', 'Hasan', 'Husain', 'Salman',
-    'Tariq', 'Malik', 'Luqman', 'Amir', 'Nabil', 'Zidan', 'Hanif', 'Naufal'
-];
-
-const FEMALE_FIRST_NAMES = [
-    'Aisyah', 'Fatimah', 'Khadijah', 'Zahra', 'Nabila', 'Salma', 'Syifa', 'Annisa',
-    'Maryam', 'Hanum', 'Yasmin', 'Rania', 'Alya', 'Fitri', 'Hilya', 'Laila',
-    'Safiya', 'Siti', 'Hasna', 'Nadia', 'Zulfa', 'Azizah', 'Latifah', 'Husna'
-];
-
-const LAST_NAMES = [
-    'Pratama', 'Hidayat', 'Ramadhan', 'Saputra', 'Kurniawan', 'Nurrizky', 'Mahendra', 'Santoso',
-    'Firmansyah', 'Wijaya', 'Ardiansyah', 'Putra', 'Maulana', 'Setiawan', 'Rahman', 'Suryana',
-    'Laksana', 'Subagja', 'Wibowo', 'Nugraha', 'Al-Ghifari', 'Al-Fatih', 'Al-Mansur', 'Al-Farisi'
-];
-
 export function generateSampleStudents(): Student[] {
-    const students: Student[] = [];
-
-    CLASSES.forEach((cls) => {
-        let nisnCounter = 81200000 + (cls.grade * 1000) + (cls.section.charCodeAt(0) * 100);
-
-        for (let i = 1; i <= 36; i++) {
-            const isMale = i % 2 !== 0;
-            const firstNames = isMale ? MALE_FIRST_NAMES : FEMALE_FIRST_NAMES;
-            const firstName = firstNames[(i * 3 + cls.section.charCodeAt(0)) % firstNames.length];
-            const lastName = LAST_NAMES[(i * 7 + cls.grade) % LAST_NAMES.length];
-            const name = `${firstName} ${lastName}`;
-            const nisn = `00${nisnCounter + i}`;
-
-            students.push({
-                id: `std_${cls.id}_${i}`,
-                nisn,
-                name,
-                gender: isMale ? 'L' : 'P',
-                classId: cls.id,
-            });
-        }
-    });
-
-    return students;
+    return [];
 }
 
 export function generateInitialProgress(students: Student[]): ProgressData {
-    const progress: ProgressData = {};
-
-    students.forEach((student, index) => {
-        progress[student.id] = {};
-        
-        const cls = CLASSES.find(c => c.id === student.classId);
-        if (!cls) return;
-
-        const surahsForGrade = SURAHS.filter(s => s.grade === cls.grade);
-
-        surahsForGrade.forEach((surah) => {
-            const completionFactor = ((index * 13 + surah.totalVerses) % 100) / 100;
-            let count = 0;
-
-            if (completionFactor > 0.85) {
-                count = surah.totalVerses;
-            } else if (completionFactor > 0.3) {
-                count = Math.floor(surah.totalVerses * (0.3 + completionFactor * 0.6));
-            } else {
-                count = Math.min(surah.totalVerses, Math.floor(surah.totalVerses * 0.2) + (index % 5));
-            }
-
-            const verses: number[] = [];
-            for (let v = 1; v <= count; v++) {
-                verses.push(v);
-            }
-            progress[student.id][surah.id] = verses;
-        });
-    });
-
-    return progress;
+    return {};
 }
 
 // LocalStorage Keys
@@ -174,21 +103,19 @@ const STORAGE_KEY_STUDENTS = 'hafalan_monitoring_students_v1';
 const STORAGE_KEY_HISTORY = 'hafalan_monitoring_history_v1';
 
 export function loadSavedStudents(): Student[] {
-    if (typeof window === 'undefined') return generateSampleStudents();
+    if (typeof window === 'undefined') return [];
     try {
         const saved = localStorage.getItem(STORAGE_KEY_STUDENTS);
-        if (saved) {
+        if (saved !== null) {
             const parsed: Student[] = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (Array.isArray(parsed)) {
                 return parsed;
             }
         }
     } catch (e) {
         console.error('Failed to load students from localStorage', e);
     }
-    const initial = generateSampleStudents();
-    saveStudentsToStorage(initial);
-    return initial;
+    return [];
 }
 
 export function saveStudentsToStorage(students: Student[]): void {
@@ -201,18 +128,16 @@ export function saveStudentsToStorage(students: Student[]): void {
 }
 
 export function loadSavedProgress(allStudents: Student[]): ProgressData {
-    if (typeof window === 'undefined') return generateInitialProgress(allStudents);
+    if (typeof window === 'undefined') return {};
     try {
         const saved = localStorage.getItem(STORAGE_KEY_PROGRESS);
-        if (saved) {
+        if (saved !== null) {
             return JSON.parse(saved);
         }
     } catch (e) {
         console.error('Failed to load progress from localStorage', e);
     }
-    const initial = generateInitialProgress(allStudents);
-    saveProgressToStorage(initial);
-    return initial;
+    return {};
 }
 
 export function saveProgressToStorage(progress: ProgressData): void {

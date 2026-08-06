@@ -529,8 +529,8 @@ class HafalanController extends Controller
         $settings = SchoolSetting::all()->pluck('value', 'key')->toArray();
 
         return [
-            'schoolName' => $settings['school_name'] ?? 'SMP / MADRASAH TSANAWIYAH ISLAMIC SCHOOL',
-            'quranTeacherName' => $settings['quran_teacher_name'] ?? 'Ustadz Pembimbing Tahfidz, S.Pd.I',
+            'schoolName' => $settings['school_name'] ?? 'NAMA SEKOLAH / MADRASAH',
+            'quranTeacherName' => $settings['quran_teacher_name'] ?? 'NAMA GURU TAHFIDZ',
         ];
     }
 
