@@ -297,6 +297,27 @@ class HafalanController extends Controller
         ]);
     }
 
+    public function clearHistory(Request $request)
+    {
+        $logCount = ActivityLog::count();
+
+        ActivityLog::query()->delete();
+
+        ActivityLog::create([
+            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
+            'student_name' => "Log Riwayat ({$logCount} Item)",
+            'student_nisn' => '-',
+            'class_name' => 'Sistem',
+            'action' => 'CLEAR_HISTORY',
+            'action_label' => 'Membersihkan Seluruh Riwayat Aktivitas Log',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'history' => $this->getLogsData(),
+        ]);
+    }
+
     public function getStudentDetail(string $idOrNisn)
     {
         $student = Student::with('schoolClass')

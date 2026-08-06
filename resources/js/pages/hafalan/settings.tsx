@@ -22,6 +22,7 @@ import {
 import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
 import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
+import { ClearHistoryModal } from '@/components/hafalan/ClearHistoryModal';
 import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,6 +73,7 @@ export default function HafalanSettingsPage({
     const [isDeleteModalOpen, setIsDeleteModalOpen] = React.useState(false);
     const [isClearClassModalOpen, setIsClearClassModalOpen] = React.useState(false);
     const [isClearAllModalOpen, setIsClearAllModalOpen] = React.useState(false);
+    const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = React.useState(false);
 
     // Importer text state
     const [importText, setImportText] = React.useState<string>('');
@@ -380,6 +382,23 @@ export default function HafalanSettingsPage({
         }
 
         showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
+    };
+
+    const handleConfirmClearHistory = async () => {
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            await fetch('/api/hafalan/history/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+            });
+        } catch (err) {
+            console.error('Failed to clear activity history log in MySQL', err);
+        }
+
+        showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
     };
 
     // Importer text handler
@@ -905,6 +924,10 @@ export default function HafalanSettingsPage({
                         <Button onClick={() => jsonFileInputRef.current?.click()} variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-400 hover:bg-blue-50 text-xs h-10 font-bold">
                             <Upload className="size-4 mr-2" /> Impor Data JSON
                         </Button>
+
+                        <Button onClick={() => setIsClearHistoryModalOpen(true)} variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-50 text-xs h-10 font-bold">
+                            <Trash2 className="size-4 mr-2" /> Hapus / Bersihkan Riwayat Log
+                        </Button>
                         <input
                             type="file"
                             ref={jsonFileInputRef}
@@ -967,6 +990,13 @@ export default function HafalanSettingsPage({
                 totalStudentCount={allStudents.length}
                 onClose={() => setIsClearAllModalOpen(false)}
                 onConfirmResetAll={handleConfirmResetAll}
+            />
+
+            {/* Clear History Log Confirmation Modal */}
+            <ClearHistoryModal
+                isOpen={isClearHistoryModalOpen}
+                onClose={() => setIsClearHistoryModalOpen(false)}
+                onConfirmClearHistory={handleConfirmClearHistory}
             />
         </AppLayout>
     );
