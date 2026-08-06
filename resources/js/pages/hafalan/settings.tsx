@@ -364,98 +364,124 @@ export default function HafalanSettingsPage({
         showToast('Data murid berhasil dihapus!');
     };
 
-    const handleConfirmClearClass = async (classId: string) => {
-        const updated = allStudents.filter((s) => s.classId !== classId);
-        setAllStudents(updated);
-        saveStudentsToStorage(updated);
-
-        // API Sync to MySQL
+    const handleConfirmClearClass = async (classId: string, password: string) => {
+        // Local state is only updated after the server confirms the delete, so a
+        // rejected password can never make the UI look like data was removed.
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/classes/clear', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
-                body: JSON.stringify({ classId }),
+                body: JSON.stringify({ classId, password }),
             });
-            const data = await res.json();
-            if (data.success) {
-                if (data.students) {
-                    setAllStudents(data.students);
-                    saveStudentsToStorage(data.students);
-                }
-                if (data.progress) {
-                    saveProgressToStorage(data.progress);
-                }
-                router.reload();
-            }
-        } catch (err) {
-            console.error('Failed to clear class data in MySQL', err);
-        }
 
-        showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Data tidak dihapus.'
+                        : `Gagal menghapus data (HTTP ${res.status}).`
+                );
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Gagal menghapus data kelas.');
+                return;
+            }
+
+            if (data.students) {
+                setAllStudents(data.students);
+                saveStudentsToStorage(data.students);
+            }
+            if (data.progress) {
+                saveProgressToStorage(data.progress);
+            }
+            router.reload();
+            showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
+        } catch (err) {
+            console.error('Failed to clear class data', err);
+            showToast('Gagal menghubungi server. Data tidak dihapus.');
+        }
     };
 
-    const handleConfirmResetAll = async () => {
-        if (typeof window !== 'undefined') {
-            localStorage.removeItem('hafalan_monitoring_students_v1');
-            localStorage.removeItem('hafalan_monitoring_progress_v1');
-            localStorage.removeItem('hafalan_monitoring_history_v1');
-        }
-        setAllStudents([]);
-
-        // API Sync to MySQL
+    const handleConfirmResetAll = async (password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/reset-all', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                body: JSON.stringify({ password }),
             });
-            const data = await res.json();
-            if (data.success) {
-                setAllStudents([]);
-                if (typeof window !== 'undefined') {
-                    localStorage.removeItem('hafalan_monitoring_students_v1');
-                    localStorage.removeItem('hafalan_monitoring_progress_v1');
-                    localStorage.removeItem('hafalan_monitoring_history_v1');
-                }
-                router.reload();
-            }
-        } catch (err) {
-            console.error('Failed to reset all data in MySQL', err);
-        }
 
-        showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Data tidak direset.'
+                        : `Gagal mereset data (HTTP ${res.status}).`
+                );
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Gagal mereset data aplikasi.');
+                return;
+            }
+
+            setAllStudents([]);
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('hafalan_monitoring_students_v1');
+                localStorage.removeItem('hafalan_monitoring_progress_v1');
+                localStorage.removeItem('hafalan_monitoring_history_v1');
+            }
+            router.reload();
+            showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
+        } catch (err) {
+            console.error('Failed to reset all data', err);
+            showToast('Gagal menghubungi server. Data tidak direset.');
+        }
     };
 
-    const handleConfirmClearHistory = async () => {
-        if (typeof window !== 'undefined') {
-            localStorage.removeItem('hafalan_monitoring_history_v1');
-        }
-
+    const handleConfirmClearHistory = async (password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            await fetch('/api/hafalan/history/clear', {
+            const res = await fetch('/api/hafalan/history/clear', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                body: JSON.stringify({ password }),
             });
+
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Riwayat tidak dihapus.'
+                        : `Gagal membersihkan riwayat (HTTP ${res.status}).`
+                );
+                return;
+            }
+
             if (typeof window !== 'undefined') {
                 localStorage.removeItem('hafalan_monitoring_history_v1');
             }
             router.reload();
+            showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
         } catch (err) {
-            console.error('Failed to clear activity history log in MySQL', err);
+            console.error('Failed to clear activity history log', err);
+            showToast('Gagal menghubungi server. Riwayat tidak dihapus.');
         }
-
-        showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
     };
 
     // Importer text handler

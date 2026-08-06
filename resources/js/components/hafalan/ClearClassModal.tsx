@@ -10,7 +10,7 @@ interface ClearClassModalProps {
     classNameStr: string;
     studentCount: number;
     onClose: () => void;
-    onConfirmClear: (classId: string) => void;
+    onConfirmClear: (classId: string, password: string) => void;
 }
 
 export const ClearClassModal: React.FC<ClearClassModalProps> = ({
@@ -22,20 +22,22 @@ export const ClearClassModal: React.FC<ClearClassModalProps> = ({
     onConfirmClear,
 }) => {
     const [typedConfirm, setTypedConfirm] = React.useState('');
+    const [password, setPassword] = React.useState('');
 
     React.useEffect(() => {
         setTypedConfirm('');
+        setPassword('');
     }, [classId, isOpen]);
 
     if (!isOpen) return null;
 
     const expectedText = `HAPUS ${classId}`;
-    const isMatch = typedConfirm.trim().toUpperCase() === expectedText;
+    const isMatch = typedConfirm.trim().toUpperCase() === expectedText && password.length > 0;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (isMatch) {
-            onConfirmClear(classId);
+            onConfirmClear(classId, password);
             onClose();
         }
     };
@@ -95,6 +97,20 @@ export const ClearClassModal: React.FC<ClearClassModalProps> = ({
                         />
                     </div>
 
+
+                    <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-foreground">
+                            Konfirmasi password akun Anda:
+                        </Label>
+                        <Input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Password login Anda"
+                            autoComplete="current-password"
+                            className="bg-background text-xs"
+                        />
+                    </div>
                     <div className="flex gap-2 pt-2">
                         <Button
                             type="button"

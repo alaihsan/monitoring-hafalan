@@ -33,6 +33,7 @@ test('admin can clear class data deleting students and progress history', functi
     $response = $this->actingAs($user)
         ->postJson('/api/hafalan/classes/clear', [
             'classId' => '7A',
+            'password' => 'password',
         ]);
 
     $response->assertOk();

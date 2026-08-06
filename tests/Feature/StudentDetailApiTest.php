@@ -3,8 +3,11 @@
 use App\Models\ClassModel;
 use App\Models\HafalanProgress;
 use App\Models\Student;
+use App\Models\User;
 
 test('api returns detailed student info and hafalan progress by id or nisn', function () {
+    $this->actingAs(User::factory()->create());
+
     $class = ClassModel::create([
         'id' => '7A',
         'name' => 'Kelas 7A',
@@ -60,4 +63,10 @@ test('api returns detailed student info and hafalan progress by id or nisn', fun
     // Test 404 for non-existent student
     $responseNotFound = $this->getJson('/api/hafalan/students/invalid_id');
     $responseNotFound->assertNotFound();
+});
+
+test('student detail api is not reachable by guests', function () {
+    // Auth is enforced before any lookup happens, so no fixtures are needed here.
+    $this->getJson('/api/hafalan/students/008123456')->assertUnauthorized();
+    $this->getJson('/api/hafalan/students/std_7a_1')->assertUnauthorized();
 });

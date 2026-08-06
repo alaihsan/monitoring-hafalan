@@ -231,78 +231,42 @@ export function addHistoryLog(log: Omit<HistoryLogItem, 'id' | 'timestamp'>): vo
 }
 
 // Smart Expirable Share Link Helpers
+//
+// The share URL is minted by the server (POST api.hafalan.classes.share-link) as a
+// cryptographically signed, optionally expiring Laravel URL. Signature and expiry are
+// verified server-side by the `signed` middleware, so there is deliberately no
+// client-side token generation or expiry check here — those could only ever hide data
+// that had already been sent to the browser.
 export type ShareDurationKey = '1d' | '7d' | '30d' | 'never';
 
 export interface ExpirableShareResult {
     url: string;
-    token: string;
-    expiresTimestamp: number;
     expirationText: string;
 }
 
-export function generateSmartShareUrl(classId: string, durationKey: ShareDurationKey): ExpirableShareResult {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-    const nowSec = Math.floor(Date.now() / 1000);
+export async function requestShareUrl(
+    classId: string,
+    durationKey: ShareDurationKey
+): Promise<ExpirableShareResult> {
+    const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
 
-    let expiresTimestamp = 0;
-    let expirationText = 'Selamanya (Tidak Ada Batas Waktu)';
+    const res = await fetch(`/api/hafalan/classes/${encodeURIComponent(classId)}/share-link`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'X-CSRF-TOKEN': csrfToken || '',
+        },
+        body: JSON.stringify({ duration: durationKey }),
+    });
 
-    if (durationKey === '1d') {
-        expiresTimestamp = nowSec + 86400; // 24 hours
-        expirationText = 'Berlaku 1 Hari';
-    } else if (durationKey === '7d') {
-        expiresTimestamp = nowSec + 604800; // 7 days
-        expirationText = 'Berlaku 7 Hari';
-    } else if (durationKey === '30d') {
-        expiresTimestamp = nowSec + 2592000; // 30 days
-        expirationText = 'Berlaku 30 Hari';
+    if (!res.ok) {
+        throw new Error(`Gagal membuat link share (HTTP ${res.status})`);
     }
 
-    // Generate secure hashed token
-    const token = `tok_${classId.toLowerCase()}_${Math.abs(hashCode(`${classId}_salt_2026_${expiresTimestamp}`)).toString(36)}`;
-    const url = `${origin}/share/hafalan?token=${token}&class=${classId}&expires=${expiresTimestamp}`;
+    const data = await res.json();
 
-    return {
-        url,
-        token,
-        expiresTimestamp,
-        expirationText,
-    };
-}
-
-function hashCode(str: string): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash |= 0;
-    }
-    return hash;
-}
-
-export function validateShareTokenExpiration(expiresParam: string | null): { isExpired: boolean; expiredDateText?: string } {
-    if (!expiresParam || expiresParam === '0') {
-        return { isExpired: false };
-    }
-
-    const expiresSec = parseInt(expiresParam, 10);
-    if (isNaN(expiresSec) || expiresSec <= 0) {
-        return { isExpired: false };
-    }
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec > expiresSec) {
-        const dateStr = new Date(expiresSec * 1000).toLocaleDateString('id-ID', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-        return { isExpired: true, expiredDateText: dateStr };
-    }
-
-    return { isExpired: false };
+    return { url: data.url, expirationText: data.expirationText };
 }
 
 // Parser for copy-pasted text (from Excel/Word/CSV)

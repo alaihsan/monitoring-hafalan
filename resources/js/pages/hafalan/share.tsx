@@ -1,90 +1,41 @@
 import React from 'react';
 import { Head } from '@inertiajs/react';
 import {
-    CLASSES,
     ClassInfo,
-    Surah,
     Student,
     ProgressData,
     SchoolSettings,
-    loadSavedStudents,
-    loadSavedProgress,
-    loadSavedClasses,
-    loadSchoolSettings,
-    validateShareTokenExpiration,
     getSurahForGradeAndSemester,
 } from '@/data/hafalan-data';
 
 import { HafalanMatrixTable } from '@/components/hafalan/HafalanMatrixTable';
 import { MobileStudentView } from '@/components/hafalan/MobileStudentView';
 import { PrintReportModal } from '@/components/hafalan/PrintReportModal';
-import { BookOpenCheck, Printer, Users, Award, Percent, AlertOctagon, Lock, ArrowLeft, Calendar, ShieldCheck } from 'lucide-react';
+import { BookOpenCheck, Printer, Users, Award, Percent, Calendar, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface SharePageProps {
-    initialClasses?: ClassInfo[];
-    initialStudents?: Student[];
-    initialProgress?: ProgressData;
-    initialSettings?: SchoolSettings;
+    // The single class this signed link grants access to. Resolved server-side.
+    shareClass: ClassInfo;
+    initialStudents: Student[];
+    initialProgress: ProgressData;
+    initialSettings: SchoolSettings;
 }
 
 export default function HafalanSharePage({
-    initialClasses,
+    shareClass,
     initialStudents,
     initialProgress,
     initialSettings,
 }: SharePageProps) {
-    const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
-    const [students, setStudents] = React.useState<Student[]>(initialStudents || []);
-    const [progress, setProgress] = React.useState<ProgressData>(initialProgress || {});
-    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>(
-        initialSettings || { schoolName: '', quranTeacherName: '' }
-    );
+    const students = React.useMemo(() => initialStudents ?? [], [initialStudents]);
+    const progress = React.useMemo(() => initialProgress ?? {}, [initialProgress]);
+    const schoolSettings = initialSettings ?? { schoolName: '', quranTeacherName: '' };
 
-    const [selectedClassId, setSelectedClassId] = React.useState<string>('7A');
     const [selectedSemester, setSelectedSemester] = React.useState<number>(1);
     const [isPrintModalOpen, setIsPrintModalOpen] = React.useState<boolean>(false);
 
-    // Expiration state
-    const [isLinkExpired, setIsLinkExpired] = React.useState<boolean>(false);
-    const [expiredDateText, setExpiredDateText] = React.useState<string>('');
-
-    React.useEffect(() => {
-        const classList = (initialClasses && initialClasses.length > 0) ? initialClasses : CLASSES;
-
-        if (typeof window !== 'undefined') {
-            const urlParams = new URLSearchParams(window.location.search);
-            const classParam = urlParams.get('class');
-            const expiresParam = urlParams.get('expires');
-
-            // Validate Expiration
-            const validation = validateShareTokenExpiration(expiresParam);
-            if (validation.isExpired) {
-                setIsLinkExpired(true);
-                setExpiredDateText(validation.expiredDateText || '');
-                return;
-            }
-
-            // Strictly lock class to the share link parameter
-            if (classParam && classList.some((c) => c.id === classParam)) {
-                setSelectedClassId(classParam);
-            }
-        }
-
-        const loadedStds = (initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents();
-        const savedClasses = (initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses();
-        const savedProg = initialProgress ? initialProgress : loadSavedProgress(loadedStds);
-        const settings = (initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings();
-
-        setStudents(loadedStds);
-        setClasses(savedClasses);
-        setProgress(savedProg);
-        setSchoolSettings(settings);
-    }, [initialClasses, initialStudents, initialProgress, initialSettings]);
-
-    const currentClass = React.useMemo(() => {
-        return classes.find((c) => c.id === selectedClassId) || classes[0];
-    }, [classes, selectedClassId]);
+    const currentClass = shareClass;
 
     const currentSurah = React.useMemo(() => {
         return getSurahForGradeAndSemester(currentClass.grade, selectedSemester);
@@ -113,45 +64,6 @@ export default function HafalanSharePage({
             avgProgress: Math.round(totalPercentSum / currentClassStudents.length),
         };
     }, [currentClassStudents, progress, currentSurah]);
-
-    // If Link is Expired -> Render Friendly Error Screen
-    if (isLinkExpired) {
-        return (
-            <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center p-4">
-                <Head title="Link Kadaluarsa - Monitoring Hafalan" />
-                <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-6 shadow-2xl">
-                    <div className="size-20 bg-rose-500/10 text-rose-500 rounded-3xl flex items-center justify-center mx-auto border border-rose-500/20">
-                        <AlertOctagon className="size-10" />
-                    </div>
-                    <div className="space-y-2">
-                        <h1 className="text-2xl font-black text-white">Link Share Sudah Kadaluarsa</h1>
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                            Link publik monitoring hafalan ini telah melewati batas waktu berlaku{' '}
-                            <span className="font-mono text-rose-400 font-bold">({expiredDateText})</span> yang ditentukan oleh Admin Sekolah.
-                        </p>
-                    </div>
-
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 space-y-2 text-left">
-                        <div className="flex items-center gap-2 font-bold text-amber-400">
-                            <Lock className="size-4" /> Apa yang harus dilakukan?
-                        </div>
-                        <p className="text-[11px] text-slate-400">
-                            Silakan hubungi Wali Kelas atau Guru Pengampu untuk meminta link publik terbaru dengan durasi berlaku yang disesuaikan.
-                        </p>
-                    </div>
-
-                    <div className="pt-2">
-                        <a
-                            href="/login"
-                            className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-lg transition-colors"
-                        >
-                            <ArrowLeft className="size-4" /> Masuk Ke Halaman Login Admin
-                        </a>
-                    </div>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">

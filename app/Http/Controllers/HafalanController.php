@@ -8,11 +8,31 @@ use App\Models\HafalanProgress;
 use App\Models\SchoolSetting;
 use App\Models\Student;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class HafalanController extends Controller
 {
+    /**
+     * Share link durations, in minutes. A null value means the link never expires.
+     */
+    private const SHARE_DURATIONS = [
+        '1d' => 1440,
+        '7d' => 10080,
+        '30d' => 43200,
+        'never' => null,
+    ];
+
+    private const SHARE_DURATION_LABELS = [
+        '1d' => 'Berlaku 1 Hari',
+        '7d' => 'Berlaku 7 Hari',
+        '30d' => 'Berlaku 30 Hari',
+        'never' => 'Selamanya (Tidak Ada Batas Waktu)',
+    ];
+
     public function index(): Response
     {
         return Inertia::render('hafalan/index', [
@@ -40,13 +60,50 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function share(Request $request): Response
+    /**
+     * Public, read-only report for a single class.
+     *
+     * Reachable only through a signed URL (see createShareLink), so the signature
+     * and its expiry are verified by the `signed` middleware before we get here.
+     * Only the shared class is exposed — never the whole student body.
+     */
+    public function share(ClassModel $class): Response
     {
+        $students = Student::where('class_id', $class->id)->get();
+
         return Inertia::render('hafalan/share', [
-            'initialClasses' => $this->getClassesData(),
-            'initialStudents' => $this->getStudentsData(),
-            'initialProgress' => $this->getProgressData(),
+            'shareClass' => [
+                'id' => $class->id,
+                'name' => $class->name,
+                'grade' => (int) $class->grade,
+                'section' => $class->section,
+                'waliKelas' => $class->wali_kelas,
+            ],
+            'initialStudents' => $this->mapStudents($students),
+            'initialProgress' => $this->getProgressData($students->pluck('id')->all()),
             'initialSettings' => $this->getSettingsData(),
+        ]);
+    }
+
+    /**
+     * Issue a signed, optionally expiring public link for one class.
+     */
+    public function createShareLink(Request $request, ClassModel $class)
+    {
+        $validated = $request->validate([
+            'duration' => ['required', Rule::in(array_keys(self::SHARE_DURATIONS))],
+        ]);
+
+        $minutes = self::SHARE_DURATIONS[$validated['duration']];
+
+        $url = $minutes === null
+            ? URL::signedRoute('hafalan.share', ['class' => $class->id])
+            : URL::temporarySignedRoute('hafalan.share', now()->addMinutes($minutes), ['class' => $class->id]);
+
+        return response()->json([
+            'success' => true,
+            'url' => $url,
+            'expirationText' => self::SHARE_DURATION_LABELS[$validated['duration']],
         ]);
     }
 
@@ -233,6 +290,7 @@ class HafalanController extends Controller
     {
         $validated = $request->validate([
             'classId' => 'required|string',
+            'password' => ['required', 'current_password'],
         ]);
 
         $class = ClassModel::find($validated['classId']);
@@ -272,6 +330,10 @@ class HafalanController extends Controller
 
     public function clearAllData(Request $request)
     {
+        $request->validate([
+            'password' => ['required', 'current_password'],
+        ]);
+
         $studentCount = Student::count();
 
         // Delete all progress, students, and logs
@@ -299,6 +361,10 @@ class HafalanController extends Controller
 
     public function clearHistory(Request $request)
     {
+        $request->validate([
+            'password' => ['required', 'current_password'],
+        ]);
+
         $logCount = ActivityLog::count();
 
         ActivityLog::query()->delete();
@@ -517,14 +583,21 @@ class HafalanController extends Controller
                 'grade' => (int) $c->grade,
                 'section' => $c->section,
                 'waliKelas' => $c->wali_kelas,
-                'shareToken' => $c->share_token,
             ];
         })->toArray();
     }
 
     private function getStudentsData(): array
     {
-        return Student::all()->map(function ($s) {
+        return $this->mapStudents(Student::all());
+    }
+
+    /**
+     * @param  Collection<int, Student>  $students
+     */
+    private function mapStudents($students): array
+    {
+        return $students->map(function ($s) {
             return [
                 'id' => $s->id,
                 'nisn' => $s->nisn,
@@ -532,12 +605,18 @@ class HafalanController extends Controller
                 'gender' => $s->gender,
                 'classId' => $s->class_id,
             ];
-        })->toArray();
+        })->values()->toArray();
     }
 
-    private function getProgressData(): array
+    /**
+     * @param  array<int, string>|null  $studentIds  Limit to these students, or all when null.
+     */
+    private function getProgressData(?array $studentIds = null): array
     {
-        $records = HafalanProgress::all();
+        $records = HafalanProgress::when(
+            $studentIds !== null,
+            fn ($q) => $q->whereIn('student_id', $studentIds)
+        )->get();
         $progress = [];
 
         foreach ($records as $r) {

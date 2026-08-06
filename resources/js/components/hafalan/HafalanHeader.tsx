@@ -1,5 +1,5 @@
 import React from 'react';
-import { ClassInfo, Surah, ShareDurationKey, generateSmartShareUrl } from '@/data/hafalan-data';
+import { ClassInfo, Surah, ShareDurationKey, requestShareUrl } from '@/data/hafalan-data';
 import { BookOpenCheck, Printer, Users, Award, Percent, Eye, Edit3, Check, Link2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,12 +30,29 @@ export const HafalanHeader: React.FC<HafalanHeaderProps> = ({
     const [shareResult, setShareResult] = React.useState({ url: '', expirationText: '' });
 
     React.useEffect(() => {
-        const res = generateSmartShareUrl(currentClass.id, durationKey);
-        setShareResult({ url: res.url, expirationText: res.expirationText });
+        let cancelled = false;
+
+        setShareResult({ url: 'Membuat link…', expirationText: '' });
+
+        requestShareUrl(currentClass.id, durationKey)
+            .then((res) => {
+                if (!cancelled) {
+                    setShareResult({ url: res.url, expirationText: res.expirationText });
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setShareResult({ url: 'Gagal membuat link share', expirationText: '' });
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [currentClass.id, durationKey]);
 
     const handleCopyShareLink = () => {
-        if (shareResult.url) {
+        if (shareResult.url && shareResult.expirationText) {
             navigator.clipboard.writeText(shareResult.url);
             setCopiedShare(true);
             setTimeout(() => setCopiedShare(false), 3500);
