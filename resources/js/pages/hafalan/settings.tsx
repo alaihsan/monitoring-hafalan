@@ -84,9 +84,26 @@ export default function HafalanSettingsPage({
     const excelFileInputRef = React.useRef<HTMLInputElement>(null);
 
     React.useEffect(() => {
-        setSchoolSettingsState((initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings());
-        setClasses((initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses());
-        setAllStudents((initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents());
+        if (initialSettings) {
+            setSchoolSettingsState(initialSettings);
+            saveSchoolSettings(initialSettings);
+        } else {
+            setSchoolSettingsState(loadSchoolSettings());
+        }
+
+        if (initialClasses && initialClasses.length > 0) {
+            setClasses(initialClasses);
+            saveClassesToStorage(initialClasses);
+        } else {
+            setClasses(loadSavedClasses());
+        }
+
+        if (initialStudents) {
+            setAllStudents(initialStudents);
+            saveStudentsToStorage(initialStudents);
+        } else {
+            setAllStudents(loadSavedStudents());
+        }
     }, [initialSettings, initialClasses, initialStudents]);
 
     const showToast = (msg: string) => {
@@ -110,7 +127,7 @@ export default function HafalanSettingsPage({
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            await fetch('/api/hafalan/settings', {
+            const res = await fetch('/api/hafalan/settings', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -118,6 +135,12 @@ export default function HafalanSettingsPage({
                 },
                 body: JSON.stringify(schoolSettings),
             });
+            const data = await res.json();
+            if (data.success && data.settings) {
+                setSchoolSettingsState(data.settings);
+                saveSchoolSettings(data.settings);
+                router.reload();
+            }
         } catch (err) {
             console.error('Failed to sync school settings to MySQL', err);
         }
@@ -131,6 +154,40 @@ export default function HafalanSettingsPage({
             saveClassesToStorage(next);
             return next;
         });
+    };
+
+    const handleSaveAllWaliKelas = async (e: React.FormEvent) => {
+        e.preventDefault();
+        saveClassesToStorage(classes);
+        addHistoryLog({
+            studentName: 'Wali Kelas 12 Rombel',
+            studentNisn: '-',
+            className: '-',
+            action: 'UPDATE_SETTINGS',
+            actionLabel: 'Ubah Nama Wali Kelas 12 Rombel',
+        });
+
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/classes/wali-kelas', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ classes }),
+            });
+            const data = await res.json();
+            if (data.success && data.classes) {
+                setClasses(data.classes);
+                saveClassesToStorage(data.classes);
+                router.reload();
+            }
+        } catch (err) {
+            console.error('Failed to sync wali kelas to MySQL', err);
+        }
+
+        showToast('Daftar Nama Wali Kelas 12 Rombel berhasil disimpan!');
     };
 
     // Filter students for active CRUD class
@@ -867,15 +924,21 @@ export default function HafalanSettingsPage({
                 </div>
 
                 {/* Section 3: Wali Kelas per 12 Rombel */}
-                <div className="bg-card text-card-foreground border-border rounded-xl border p-6 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2.5 border-b border-border/80 pb-3">
-                        <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600">
-                            <UserCheck className="size-5" />
+                <form onSubmit={handleSaveAllWaliKelas} className="bg-card text-card-foreground border-border rounded-xl border p-6 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-3">
+                        <div className="flex items-center gap-2.5">
+                            <div className="flex size-9 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600">
+                                <UserCheck className="size-5" />
+                            </div>
+                            <div>
+                                <h2 className="text-base font-extrabold text-foreground">Daftar Wali Kelas Per Rombel (12 Kelas)</h2>
+                                <p className="text-xs text-muted-foreground">Sesuaikan nama Wali Kelas untuk setiap rombongan belajar.</p>
+                            </div>
                         </div>
-                        <div>
-                            <h2 className="text-base font-extrabold text-foreground">Daftar Wali Kelas Per Rombel (12 Kelas)</h2>
-                            <p className="text-xs text-muted-foreground">Sesuaikan nama Wali Kelas untuk setiap rombongan belajar.</p>
-                        </div>
+
+                        <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-4 shadow-sm self-start sm:self-auto">
+                            <Save className="size-4 mr-1.5" /> Simpan Wali Kelas
+                        </Button>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -891,13 +954,19 @@ export default function HafalanSettingsPage({
                                     type="text"
                                     value={cls.waliKelas}
                                     onChange={(e) => handleUpdateWaliKelas(cls.id, e.target.value)}
-                                    placeholder="Nama Wali Kelas..."
+                                    placeholder="Masukkan nama Wali Kelas..."
                                     className="bg-background text-xs font-semibold"
                                 />
                             </div>
                         ))}
                     </div>
-                </div>
+
+                    <div className="flex justify-end pt-2">
+                        <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-10 px-5 shadow-sm">
+                            <Save className="size-4 mr-2" /> Simpan Nama Wali Kelas (12 Rombel)
+                        </Button>
+                    </div>
+                </form>
 
                 {/* Section 4: Backup Data (Ekspor - Impor JSON) */}
                 <div className="bg-card text-card-foreground border-border rounded-xl border p-6 shadow-sm space-y-4">

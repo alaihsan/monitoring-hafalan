@@ -447,18 +447,18 @@ class HafalanController extends Controller
     public function updateSettings(Request $request)
     {
         $validated = $request->validate([
-            'schoolName' => 'required|string',
-            'quranTeacherName' => 'required|string',
+            'schoolName' => 'nullable|string',
+            'quranTeacherName' => 'nullable|string',
         ]);
 
         SchoolSetting::updateOrCreate(
             ['key' => 'school_name'],
-            ['value' => $validated['schoolName']]
+            ['value' => $validated['schoolName'] ?? '']
         );
 
         SchoolSetting::updateOrCreate(
             ['key' => 'quran_teacher_name'],
-            ['value' => $validated['quranTeacherName']]
+            ['value' => $validated['quranTeacherName'] ?? '']
         );
 
         ActivityLog::create([
@@ -474,6 +474,35 @@ class HafalanController extends Controller
             'success' => true,
             'settings' => $this->getSettingsData(),
             'history' => $this->getLogsData(),
+        ]);
+    }
+
+    public function updateWaliKelas(Request $request)
+    {
+        $validated = $request->validate([
+            'classes' => 'required|array',
+            'classes.*.id' => 'required|string',
+            'classes.*.waliKelas' => 'nullable|string',
+        ]);
+
+        foreach ($validated['classes'] as $cls) {
+            ClassModel::where('id', $cls['id'])->update([
+                'wali_kelas' => $cls['waliKelas'] ?? '',
+            ]);
+        }
+
+        ActivityLog::create([
+            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
+            'student_name' => 'Wali Kelas 12 Rombel',
+            'student_nisn' => '-',
+            'class_name' => 'Sistem',
+            'action' => 'UPDATE_SETTINGS',
+            'action_label' => 'Mengubah Nama Wali Kelas 12 Rombel',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'classes' => $this->getClassesData(),
         ]);
     }
 
@@ -529,8 +558,8 @@ class HafalanController extends Controller
         $settings = SchoolSetting::all()->pluck('value', 'key')->toArray();
 
         return [
-            'schoolName' => $settings['school_name'] ?? 'NAMA SEKOLAH / MADRASAH',
-            'quranTeacherName' => $settings['quran_teacher_name'] ?? 'NAMA GURU TAHFIDZ',
+            'schoolName' => $settings['school_name'] ?? '',
+            'quranTeacherName' => $settings['quran_teacher_name'] ?? '',
         ];
     }
 

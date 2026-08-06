@@ -31,6 +31,7 @@ Route::middleware(['auth', 'throttle:60,1'])->group(function () {
     Route::post('/api/hafalan/reset-all', [HafalanController::class, 'clearAllData'])->name('api.hafalan.reset-all');
     Route::post('/api/hafalan/history/clear', [HafalanController::class, 'clearHistory'])->name('api.hafalan.history.clear');
     Route::post('/api/hafalan/settings', [HafalanController::class, 'updateSettings'])->name('api.hafalan.settings.update');
+    Route::post('/api/hafalan/classes/wali-kelas', [HafalanController::class, 'updateWaliKelas'])->name('api.hafalan.classes.wali-kelas');
 });
 
 require __DIR__.'/settings.php';

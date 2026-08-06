@@ -10,14 +10,14 @@ class HafalanDatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. School Settings
+        // 1. School Settings (Empty default values)
         DB::table('school_settings')->updateOrInsert(
             ['key' => 'school_name'],
-            ['value' => 'NAMA SEKOLAH / MADRASAH', 'updated_at' => now()]
+            ['value' => '', 'updated_at' => now()]
         );
         DB::table('school_settings')->updateOrInsert(
             ['key' => 'quran_teacher_name'],
-            ['value' => 'NAMA GURU TAHFIDZ', 'updated_at' => now()]
+            ['value' => '', 'updated_at' => now()]
         );
 
         // 2. Classes
@@ -37,7 +37,7 @@ class HafalanDatabaseSeeder extends Seeder
         ];
 
         foreach ($classes as $cls) {
-            $token = Str::slug($cls['id']) . '_' . substr(md5('hafalan_key_' . $cls['id']), 0, 10);
+            $token = Str::slug($cls['id']).'_'.substr(md5('hafalan_key_'.$cls['id']), 0, 10);
             DB::table('classes')->updateOrInsert(
                 ['id' => $cls['id']],
                 [

@@ -77,8 +77,8 @@ export const CLASSES: ClassInfo[] = [
 ];
 
 export const DEFAULT_SCHOOL_SETTINGS: SchoolSettings = {
-    schoolName: 'NAMA SEKOLAH / MADRASAH',
-    quranTeacherName: 'NAMA GURU TAHFIDZ',
+    schoolName: '',
+    quranTeacherName: '',
 };
 
 // Helper to get surah by grade and semester
