@@ -64,7 +64,7 @@ export const MobileStudentView: React.FC<MobileStudentViewProps> = ({
                                             {student.gender}
                                         </span>
                                     </div>
-                                    {!isViewOnly && <div className="text-xs text-muted-foreground font-mono">NISN: {student.nisn}</div>}
+                                    {!isViewOnly && <div className="text-xs text-muted-foreground font-mono">NIS: {student.nis}</div>}
                                 </div>
                             </div>
 

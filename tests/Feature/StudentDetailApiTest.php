@@ -5,7 +5,7 @@ use App\Models\HafalanProgress;
 use App\Models\Student;
 use App\Models\User;
 
-test('api returns detailed student info and hafalan progress by id or nisn', function () {
+test('api returns detailed student info and hafalan progress by id or nis', function () {
     $this->actingAs(User::factory()->create());
 
     $class = ClassModel::create([
@@ -16,9 +16,9 @@ test('api returns detailed student info and hafalan progress by id or nisn', fun
         'wali_kelas' => 'Ustadz Test',
     ]);
 
-    $student = Student::create([
+    $student = Student::forceCreate([
         'id' => 'std_7a_1',
-        'nisn' => '008123456',
+        'nis' => '008123456',
         'name' => 'Ahmad Fulan',
         'gender' => 'L',
         'class_id' => '7A',
@@ -43,7 +43,7 @@ test('api returns detailed student info and hafalan progress by id or nisn', fun
         'success' => true,
         'student' => [
             'id' => 'std_7a_1',
-            'nisn' => '008123456',
+            'nis' => '008123456',
             'name' => 'Ahmad Fulan',
             'className' => 'Kelas 7A',
         ],
@@ -55,10 +55,10 @@ test('api returns detailed student info and hafalan progress by id or nisn', fun
         ],
     ]);
 
-    // Test lookup by NISN
-    $responseNisn = $this->getJson('/api/hafalan/students/008123456');
-    $responseNisn->assertOk();
-    $responseNisn->assertJson(['success' => true]);
+    // Test lookup by NIS
+    $responseNis = $this->getJson('/api/hafalan/students/008123456');
+    $responseNis->assertOk();
+    $responseNis->assertJson(['success' => true]);
 
     // Test 404 for non-existent student
     $responseNotFound = $this->getJson('/api/hafalan/students/invalid_id');

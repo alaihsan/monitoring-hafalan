@@ -69,8 +69,8 @@ export const DeleteStudentModal: React.FC<DeleteStudentModalProps> = ({
                         <strong className="text-foreground font-bold text-sm">{student.name}</strong>
                     </div>
                     <div>
-                        <span className="text-muted-foreground font-semibold">NISN:</span>{' '}
-                        <span className="font-mono text-foreground font-bold">{student.nisn}</span>
+                        <span className="text-muted-foreground font-semibold">NIS:</span>{' '}
+                        <span className="font-mono text-foreground font-bold">{student.nis}</span>
                     </div>
                     {className && (
                         <div>

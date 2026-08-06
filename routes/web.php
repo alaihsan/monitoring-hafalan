@@ -19,7 +19,8 @@ Route::middleware(['auth', 'throttle:60,1'])->group(function () {
     Route::get('/hafalan/history', [HafalanController::class, 'history'])->name('hafalan.history');
 
     // API endpoints for DB sync
-    Route::get('/api/hafalan/students/{idOrNisn}', [HafalanController::class, 'getStudentDetail'])->name('api.hafalan.students.detail');
+    Route::get('/api/hafalan/export', [HafalanController::class, 'exportData'])->name('api.hafalan.export');
+    Route::get('/api/hafalan/students/{idOrNis}', [HafalanController::class, 'getStudentDetail'])->name('api.hafalan.students.detail');
     Route::post('/api/hafalan/toggle-verse', [HafalanController::class, 'toggleVerse'])->name('api.hafalan.toggle-verse');
     Route::post('/api/hafalan/toggle-column-verse', [HafalanController::class, 'toggleColumnVerse'])->name('api.hafalan.toggle-column-verse');
     Route::post('/api/hafalan/students', [HafalanController::class, 'saveStudent'])->name('api.hafalan.students.save');

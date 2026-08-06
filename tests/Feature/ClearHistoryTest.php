@@ -7,9 +7,9 @@ test('admin can clear activity history log table in database', function () {
     $user = User::factory()->create();
 
     ActivityLog::create([
-        'timestamp_str' => '06 Aug 2026 10:00:00',
+        'logged_at' => now(),
         'student_name' => 'Ahmad Fulan',
-        'student_nisn' => '0081234',
+        'student_nis' => '0081234',
         'class_name' => 'Kelas 7A',
         'surah_name' => 'Al-Mursalat',
         'verse_num' => 1,
@@ -32,9 +32,9 @@ test('clearing history is rejected without the correct password', function () {
     $user = User::factory()->create();
 
     ActivityLog::create([
-        'timestamp_str' => '06 Aug 2026 10:00:00',
+        'logged_at' => now(),
         'student_name' => 'Ahmad Fulan',
-        'student_nisn' => '0081234',
+        'student_nis' => '0081234',
         'class_name' => 'Kelas 7A',
         'action' => 'CHECKED',
     ]);

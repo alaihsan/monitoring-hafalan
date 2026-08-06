@@ -2,7 +2,6 @@ import React from 'react';
 import { ClassInfo, Surah, ShareDurationKey, requestShareUrl } from '@/data/hafalan-data';
 import { BookOpenCheck, Printer, Users, Award, Percent, Eye, Edit3, Check, Link2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 
 interface HafalanHeaderProps {
     currentClass: ClassInfo;

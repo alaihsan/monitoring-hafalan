@@ -3,9 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Student extends Model
 {
+    use SoftDeletes;
+
     protected $table = 'students';
 
     protected $primaryKey = 'id';
@@ -14,9 +17,12 @@ class Student extends Model
 
     protected $keyType = 'string';
 
+    /**
+     * 'id' is deliberately absent: primary keys are server-generated ULIDs, and
+     * leaving it mass-assignable let a request overwrite an unrelated student.
+     */
     protected $fillable = [
-        'id',
-        'nisn',
+        'nis',
         'name',
         'gender',
         'class_id',

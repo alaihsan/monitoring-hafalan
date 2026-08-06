@@ -16,9 +16,9 @@ test('admin can reset all application data truncating students and progress', fu
         'wali_kelas' => 'Ustadz Test',
     ]);
 
-    $student = Student::create([
+    $student = Student::forceCreate([
         'id' => 'std_7a_1',
-        'nisn' => '0081234',
+        'nis' => '0081234',
         'name' => 'Siswa 1',
         'gender' => 'L',
         'class_id' => '7A',
@@ -51,9 +51,9 @@ test('resetting all data is rejected without the correct password', function () 
         'wali_kelas' => 'Ustadz Test',
     ]);
 
-    Student::create([
+    Student::forceCreate([
         'id' => 'std_7a_1',
-        'nisn' => '0081234',
+        'nis' => '0081234',
         'name' => 'Siswa 1',
         'gender' => 'L',
         'class_id' => '7A',

@@ -16,9 +16,9 @@ test('admin can clear class data deleting students and progress history', functi
         'wali_kelas' => 'Ustadz Test',
     ]);
 
-    $student1 = Student::create([
+    $student1 = Student::forceCreate([
         'id' => 'std_7a_1',
-        'nisn' => '0081234',
+        'nis' => '0081234',
         'name' => 'Siswa 1',
         'gender' => 'L',
         'class_id' => '7A',

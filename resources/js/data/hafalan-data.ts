@@ -14,11 +14,13 @@ export interface ClassInfo {
     grade: number;
     section: string;
     waliKelas: string;
+    /** Server-provided; the client no longer holds every class's students. */
+    studentCount?: number;
 }
 
 export interface Student {
     id: string;
-    nisn: string;
+    nis: string;
     name: string;
     gender: 'L' | 'P';
     classId: string;
@@ -42,7 +44,7 @@ export interface HistoryLogItem {
     id: string;
     timestamp: string;
     studentName: string;
-    studentNisn: string;
+    studentNis: string;
     className: string;
     surahName?: string;
     verseNum?: number;
@@ -87,148 +89,12 @@ export function getSurahForGradeAndSemester(grade: number, semester: number): Su
     return found || SURAHS[0];
 }
 
-export function generateSampleStudents(): Student[] {
-    return [];
-}
-
-export function generateInitialProgress(students: Student[]): ProgressData {
-    return {};
-}
-
-// LocalStorage Keys
-const STORAGE_KEY_PROGRESS = 'hafalan_monitoring_progress_v1';
-const STORAGE_KEY_CLASSES = 'hafalan_monitoring_classes_v1';
-const STORAGE_KEY_SETTINGS = 'hafalan_monitoring_settings_v1';
-const STORAGE_KEY_STUDENTS = 'hafalan_monitoring_students_v1';
-const STORAGE_KEY_HISTORY = 'hafalan_monitoring_history_v1';
-
-export function loadSavedStudents(): Student[] {
-    if (typeof window === 'undefined') return [];
-    try {
-        const saved = localStorage.getItem(STORAGE_KEY_STUDENTS);
-        if (saved !== null) {
-            const parsed: Student[] = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
-                return parsed;
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load students from localStorage', e);
-    }
-    return [];
-}
-
-export function saveStudentsToStorage(students: Student[]): void {
-    if (typeof window === 'undefined') return;
-    try {
-        localStorage.setItem(STORAGE_KEY_STUDENTS, JSON.stringify(students));
-    } catch (e) {
-        console.error('Failed to save students to localStorage', e);
-    }
-}
-
-export function loadSavedProgress(allStudents: Student[]): ProgressData {
-    if (typeof window === 'undefined') return {};
-    try {
-        const saved = localStorage.getItem(STORAGE_KEY_PROGRESS);
-        if (saved !== null) {
-            return JSON.parse(saved);
-        }
-    } catch (e) {
-        console.error('Failed to load progress from localStorage', e);
-    }
-    return {};
-}
-
-export function saveProgressToStorage(progress: ProgressData): void {
-    if (typeof window === 'undefined') return;
-    try {
-        localStorage.setItem(STORAGE_KEY_PROGRESS, JSON.stringify(progress));
-    } catch (e) {
-        console.error('Failed to save progress to localStorage', e);
-    }
-}
-
-export function loadSavedClasses(): ClassInfo[] {
-    if (typeof window === 'undefined') return CLASSES;
-    try {
-        const saved = localStorage.getItem(STORAGE_KEY_CLASSES);
-        if (saved) {
-            return JSON.parse(saved);
-        }
-    } catch (e) {
-        console.error('Failed to load classes from localStorage', e);
-    }
-    return CLASSES;
-}
-
-export function saveClassesToStorage(classes: ClassInfo[]): void {
-    if (typeof window === 'undefined') return;
-    try {
-        localStorage.setItem(STORAGE_KEY_CLASSES, JSON.stringify(classes));
-    } catch (e) {
-        console.error('Failed to save classes to localStorage', e);
-    }
-}
-
-export function loadSchoolSettings(): SchoolSettings {
-    if (typeof window === 'undefined') return DEFAULT_SCHOOL_SETTINGS;
-    try {
-        const saved = localStorage.getItem(STORAGE_KEY_SETTINGS);
-        if (saved) {
-            return JSON.parse(saved);
-        }
-    } catch (e) {
-        console.error('Failed to load school settings from localStorage', e);
-    }
-    return DEFAULT_SCHOOL_SETTINGS;
-}
-
-export function saveSchoolSettings(settings: SchoolSettings): void {
-    if (typeof window === 'undefined') return;
-    try {
-        localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    } catch (e) {
-        console.error('Failed to save school settings to localStorage', e);
-    }
-}
-
-// Activity History Log Helpers
-export function loadHistoryLogs(): HistoryLogItem[] {
-    if (typeof window === 'undefined') return [];
-    try {
-        const saved = localStorage.getItem(STORAGE_KEY_HISTORY);
-        if (saved) {
-            return JSON.parse(saved);
-        }
-    } catch (e) {
-        console.error('Failed to load history logs from localStorage', e);
-    }
-    return [];
-}
-
-export function addHistoryLog(log: Omit<HistoryLogItem, 'id' | 'timestamp'>): void {
-    if (typeof window === 'undefined') return;
-    try {
-        const currentLogs = loadHistoryLogs();
-        const newLogItem: HistoryLogItem = {
-            ...log,
-            id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            timestamp: new Date().toLocaleDateString('id-ID', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            }),
-        };
-        const updatedLogs = [newLogItem, ...currentLogs].slice(0, 500); // Keep max 500 logs
-        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(updatedLogs));
-    } catch (e) {
-        console.error('Failed to add history log to localStorage', e);
-    }
-}
+// NOTE: student names, NIS and progress used to be mirrored into localStorage.
+// That left personal data sitting on shared school computers indefinitely (readable
+// after logout), and made the cache a second source of truth that could mask real
+// data loss when the server returned an empty set. The database is now the only
+// source; only non-personal UI preferences (sidebar, appearance) still use
+// localStorage, and those live in their own hooks.
 
 // Smart Expirable Share Link Helpers
 //
@@ -270,59 +136,65 @@ export async function requestShareUrl(
 }
 
 // Parser for copy-pasted text (from Excel/Word/CSV)
-export function parseStudentsFromImportText(rawText: string, targetClassId: string): Student[] {
-    const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-    const parsedStudents: Student[] = [];
-
-    lines.forEach((line, index) => {
-        const tokens = line.split(/[\t,;]+|\s+/).map(p => p.trim()).filter(Boolean);
-        let nisn = '';
-        let name = '';
-
-        if (tokens.length >= 2) {
-            if (/^\d+$/.test(tokens[0])) {
-                nisn = tokens[0];
-                name = tokens.slice(1).join(' ');
-            } else if (/^\d+[\.\)]?$/.test(tokens[0]) && tokens.length >= 3 && /^\d+$/.test(tokens[1])) {
-                nisn = tokens[1];
-                name = tokens.slice(2).join(' ');
-            } else if (/^\d+[\.\)]?$/.test(tokens[0])) {
-                name = tokens.slice(1).join(' ');
-            } else {
-                name = tokens.join(' ');
-            }
-        } else if (tokens.length === 1) {
-            name = tokens[0].replace(/^\d+[\.\)]\s*/, '');
-        }
-
-        name = name.replace(/^\d+[\.\)]\s*/, '').trim();
-
-        if (!nisn) {
-            nisn = `0089${targetClassId}${index + 101}`;
-        }
-
-        if (name) {
-            parsedStudents.push({
-                id: `std_${targetClassId}_imported_${Date.now()}_${index}`,
-                nisn,
-                name,
-                gender: index % 2 === 0 ? 'L' : 'P',
-                classId: targetClassId,
-            });
-        }
-    });
-
-    return parsedStudents;
+//
+// This parser reports what it found and never invents values. The previous version
+// fabricated a NIS when none could be parsed and assigned gender by alternating on
+// row index, so importing a list silently produced wrong data for half the students.
+export interface ParsedStudentRow {
+    nis: string;
+    name: string;
+    gender: 'L' | 'P' | null;
+    classId: string;
+    /** Human-readable reasons this row cannot be imported yet. Empty means valid. */
+    issues: string[];
 }
 
-export function resetAllDataToDefault(): { students: Student[]; progress: ProgressData; classes: ClassInfo[]; settings: SchoolSettings } {
-    const students = generateSampleStudents();
-    const progress = generateInitialProgress(students);
-    const classes = CLASSES;
-    const settings = DEFAULT_SCHOOL_SETTINGS;
-    saveStudentsToStorage(students);
-    saveProgressToStorage(progress);
-    saveClassesToStorage(classes);
-    saveSchoolSettings(settings);
-    return { students, progress, classes, settings };
+const GENDER_TOKENS: Record<string, 'L' | 'P'> = {
+    L: 'L',
+    LK: 'L',
+    'LAKI-LAKI': 'L',
+    LAKI: 'L',
+    P: 'P',
+    PR: 'P',
+    PEREMPUAN: 'P',
+    WANITA: 'P',
+};
+
+export function parseStudentsFromImportText(rawText: string, targetClassId: string): ParsedStudentRow[] {
+    const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+    return lines.map((line) => {
+        let tokens = line.split(/[\t,;]+|\s+/).map((p) => p.trim()).filter(Boolean);
+
+        // Drop a leading row number like "1." or "12)" — it is ordering, not data.
+        if (tokens.length > 1 && /^\d{1,3}[.)]$/.test(tokens[0])) {
+            tokens = tokens.slice(1);
+        }
+
+        // Gender: a standalone L/P style token anywhere in the row.
+        let gender: 'L' | 'P' | null = null;
+        const genderIndex = tokens.findIndex((t) => GENDER_TOKENS[t.toUpperCase()] !== undefined);
+        if (genderIndex !== -1) {
+            gender = GENDER_TOKENS[tokens[genderIndex].toUpperCase()];
+            tokens = [...tokens.slice(0, genderIndex), ...tokens.slice(genderIndex + 1)];
+        }
+
+        // NIS: a numeric token of at least 3 digits, so a stray ordering number is
+        // not mistaken for a student number.
+        let nis = '';
+        const nisIndex = tokens.findIndex((t) => /^\d{3,}$/.test(t));
+        if (nisIndex !== -1) {
+            nis = tokens[nisIndex];
+            tokens = [...tokens.slice(0, nisIndex), ...tokens.slice(nisIndex + 1)];
+        }
+
+        const name = tokens.join(' ').replace(/^\d+[.)]\s*/, '').trim();
+
+        const issues: string[] = [];
+        if (!name) issues.push('Nama tidak terbaca');
+        if (!nis) issues.push('NIS tidak terbaca');
+        if (!gender) issues.push('Jenis kelamin (L/P) tidak terbaca');
+
+        return { nis, name, gender, classId: targetClassId, issues };
+    });
 }

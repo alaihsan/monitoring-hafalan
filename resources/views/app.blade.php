@@ -4,6 +4,11 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
+        {{-- Every hafalan write goes through raw fetch() and reads this tag for its
+             X-CSRF-TOKEN header. Without it the header was sent empty and Laravel
+             rejected the request with 419, so none of those writes reached the database. --}}
+        <meta name="csrf-token" content="{{ csrf_token() }}">
+
         <title inertia>{{ config('app.name', 'Monitoring Hafalan') }}</title>
 
         <!-- Custom Favicon -->

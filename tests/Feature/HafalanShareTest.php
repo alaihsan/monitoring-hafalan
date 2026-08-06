@@ -22,17 +22,17 @@ beforeEach(function () {
         'wali_kelas' => 'Ustadz Lain',
     ]);
 
-    Student::create([
+    Student::forceCreate([
         'id' => 'std_7a_1',
-        'nisn' => '0081234',
+        'nis' => '0081234',
         'name' => 'Ahmad Fulan',
         'gender' => 'L',
         'class_id' => '7A',
     ]);
 
-    Student::create([
+    Student::forceCreate([
         'id' => 'std_8b_1',
-        'nisn' => '0089999',
+        'nis' => '0089999',
         'name' => 'Siswa Kelas Lain',
         'gender' => 'P',
         'class_id' => '8B',
