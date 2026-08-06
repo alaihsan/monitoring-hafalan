@@ -667,14 +667,6 @@ export default function HafalanSettingsPage({
                     <div className="space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold text-foreground">
                             <span>Daftar Murid {currentClassName} ({crudClassStudents.length} Siswa):</span>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setIsClearClassModalOpen(true)}
-                                className="border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 font-bold text-xs h-8 self-start sm:self-auto"
-                            >
-                                <Trash2 className="size-3.5 mr-1.5" /> Kosongkan Data {currentClassName}
-                            </Button>
                         </div>
 
                         <div className="max-h-64 overflow-y-auto rounded-xl border border-border bg-background">
@@ -935,32 +927,6 @@ export default function HafalanSettingsPage({
                             accept=".json"
                             className="hidden"
                         />
-                    </div>
-                </div>
-
-                {/* Section 5: Zona Bahaya - Reset Total Data Aplikasi */}
-                <div className="bg-rose-500/5 border border-rose-500/30 rounded-xl p-6 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2.5 border-b border-rose-500/20 pb-3">
-                        <div className="flex size-9 items-center justify-center rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400">
-                            <AlertCircle className="size-5" />
-                        </div>
-                        <div>
-                            <h2 className="text-base font-extrabold text-foreground">Zona Bahaya - Reset Total Data Aplikasi</h2>
-                            <p className="text-xs text-muted-foreground">Hapus bersih seluruh daftar murid, centang hafalan, dan riwayat di semua kelas sekaligus.</p>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="text-xs text-muted-foreground font-medium">
-                            Gunakan tombol ini saat pergantian tahun ajaran baru jika ingin mengosongkan seluruh database aplikasi.
-                        </div>
-                        <Button
-                            type="button"
-                            onClick={() => setIsClearAllModalOpen(true)}
-                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs h-10 px-4 shrink-0 shadow-md shadow-rose-600/20"
-                        >
-                            <Trash2 className="size-4 mr-2" /> Reset / Kosongkan Seluruh Data Aplikasi
-                        </Button>
                     </div>
                 </div>
             </div>
