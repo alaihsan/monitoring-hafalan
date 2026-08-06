@@ -8,6 +8,11 @@ Route::get('/share/hafalan', [HafalanController::class, 'share'])
     ->middleware(['throttle:30,1'])
     ->name('hafalan.share');
 
+// Public API for single student details & hafalan progress
+Route::get('/api/hafalan/students/{idOrNisn}', [HafalanController::class, 'getStudentDetail'])
+    ->middleware(['throttle:60,1'])
+    ->name('api.hafalan.students.detail');
+
 // Protected admin routes requiring login & rate-limited (60 requests/min)
 Route::middleware(['auth', 'throttle:60,1'])->group(function () {
     Route::get('/', [HafalanController::class, 'index'])->name('home');
@@ -23,6 +28,7 @@ Route::middleware(['auth', 'throttle:60,1'])->group(function () {
     Route::delete('/api/hafalan/students/{id}', [HafalanController::class, 'deleteStudent'])->name('api.hafalan.students.delete');
     Route::post('/api/hafalan/students/import', [HafalanController::class, 'importStudents'])->name('api.hafalan.students.import');
     Route::post('/api/hafalan/classes/clear', [HafalanController::class, 'clearClassData'])->name('api.hafalan.classes.clear');
+    Route::post('/api/hafalan/reset-all', [HafalanController::class, 'clearAllData'])->name('api.hafalan.reset-all');
     Route::post('/api/hafalan/settings', [HafalanController::class, 'updateSettings'])->name('api.hafalan.settings.update');
 });
 

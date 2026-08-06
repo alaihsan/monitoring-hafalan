@@ -21,6 +21,7 @@ import {
 
 import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
 import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
+import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
 import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -70,6 +71,7 @@ export default function HafalanSettingsPage({
     const [studentToDelete, setStudentToDelete] = React.useState<Student | null>(null);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = React.useState(false);
     const [isClearClassModalOpen, setIsClearClassModalOpen] = React.useState(false);
+    const [isClearAllModalOpen, setIsClearAllModalOpen] = React.useState(false);
 
     // Importer text state
     const [importText, setImportText] = React.useState<string>('');
@@ -342,6 +344,42 @@ export default function HafalanSettingsPage({
         }
 
         showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
+    };
+
+    const handleConfirmResetAll = async () => {
+        setAllStudents([]);
+        saveStudentsToStorage([]);
+        saveProgressToStorage({});
+
+        addHistoryLog({
+            studentName: 'Seluruh Aplikasi',
+            studentNisn: '-',
+            className: 'Semua Kelas',
+            action: 'DELETE_STUDENT',
+            actionLabel: 'Mereset Total Seluruh Data Murid & Riwayat',
+        });
+
+        // API Sync to MySQL
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/reset-all', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+            });
+            const data = await res.json();
+            if (data.success) {
+                setAllStudents([]);
+                saveStudentsToStorage([]);
+                saveProgressToStorage({});
+            }
+        } catch (err) {
+            console.error('Failed to reset all data in MySQL', err);
+        }
+
+        showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
     };
 
     // Importer text handler
@@ -876,6 +914,32 @@ export default function HafalanSettingsPage({
                         />
                     </div>
                 </div>
+
+                {/* Section 5: Zona Bahaya - Reset Total Data Aplikasi */}
+                <div className="bg-rose-500/5 border border-rose-500/30 rounded-xl p-6 shadow-sm space-y-4">
+                    <div className="flex items-center gap-2.5 border-b border-rose-500/20 pb-3">
+                        <div className="flex size-9 items-center justify-center rounded-lg bg-rose-500/20 text-rose-600 dark:text-rose-400">
+                            <AlertCircle className="size-5" />
+                        </div>
+                        <div>
+                            <h2 className="text-base font-extrabold text-foreground">Zona Bahaya - Reset Total Data Aplikasi</h2>
+                            <p className="text-xs text-muted-foreground">Hapus bersih seluruh daftar murid, centang hafalan, dan riwayat di semua kelas sekaligus.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="text-xs text-muted-foreground font-medium">
+                            Gunakan tombol ini saat pergantian tahun ajaran baru jika ingin mengosongkan seluruh database aplikasi.
+                        </div>
+                        <Button
+                            type="button"
+                            onClick={() => setIsClearAllModalOpen(true)}
+                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs h-10 px-4 shrink-0 shadow-md shadow-rose-600/20"
+                        >
+                            <Trash2 className="size-4 mr-2" /> Reset / Kosongkan Seluruh Data Aplikasi
+                        </Button>
+                    </div>
+                </div>
             </div>
 
             {/* Case-Sensitive Delete Modal */}
@@ -895,6 +959,14 @@ export default function HafalanSettingsPage({
                 studentCount={crudClassStudents.length}
                 onClose={() => setIsClearClassModalOpen(false)}
                 onConfirmClear={handleConfirmClearClass}
+            />
+
+            {/* Clear All Data Confirmation Modal */}
+            <ClearAllDataModal
+                isOpen={isClearAllModalOpen}
+                totalStudentCount={allStudents.length}
+                onClose={() => setIsClearAllModalOpen(false)}
+                onConfirmResetAll={handleConfirmResetAll}
             />
         </AppLayout>
     );

@@ -270,6 +270,117 @@ class HafalanController extends Controller
         ]);
     }
 
+    public function clearAllData(Request $request)
+    {
+        $studentCount = Student::count();
+
+        // Delete all progress, students, and logs
+        HafalanProgress::query()->delete();
+        Student::query()->delete();
+        ActivityLog::query()->delete();
+
+        // Create initial log for clear all action
+        ActivityLog::create([
+            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
+            'student_name' => "Seluruh Data Aplikasi ({$studentCount} Siswa)",
+            'student_nisn' => '-',
+            'class_name' => 'Semua Kelas',
+            'action' => 'RESET_ALL',
+            'action_label' => 'Mereset & Mengosongkan Seluruh Data Murid & Riwayat',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'students' => [],
+            'progress' => [],
+            'history' => $this->getLogsData(),
+        ]);
+    }
+
+    public function getStudentDetail(string $idOrNisn)
+    {
+        $student = Student::with('schoolClass')
+            ->where('id', $idOrNisn)
+            ->orWhere('nisn', $idOrNisn)
+            ->first();
+
+        if (! $student) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Siswa tidak ditemukan dengan ID/NISN: '.$idOrNisn,
+            ], 404);
+        }
+
+        $progressRecords = HafalanProgress::where('student_id', $student->id)->get();
+
+        $progressMap = [];
+        foreach ($progressRecords as $rec) {
+            $progressMap[$rec->surah_id][] = (int) $rec->verse_num;
+        }
+
+        foreach ($progressMap as $sId => $verses) {
+            sort($progressMap[$sId]);
+        }
+
+        $surahs = [
+            ['id' => 'al-mursalat', 'number' => 77, 'name' => 'Al-Mursalat', 'arabicName' => 'المرسلات', 'totalVerses' => 50, 'grade' => 7, 'semester' => 1],
+            ['id' => 'al-insan', 'number' => 76, 'name' => 'Al-Insan', 'arabicName' => 'الإنسان', 'totalVerses' => 31, 'grade' => 7, 'semester' => 2],
+            ['id' => 'al-qiyamah', 'number' => 75, 'name' => 'Al-Qiyamah', 'arabicName' => 'القيامة', 'totalVerses' => 40, 'grade' => 8, 'semester' => 1],
+            ['id' => 'al-muddtastsir', 'number' => 74, 'name' => 'Al-Muddaththir', 'arabicName' => 'المدثر', 'totalVerses' => 56, 'grade' => 8, 'semester' => 2],
+            ['id' => 'al-muzzammil', 'number' => 73, 'name' => 'Al-Muzzammil', 'arabicName' => 'المزمل', 'totalVerses' => 20, 'grade' => 9, 'semester' => 1],
+            ['id' => 'al-jin', 'number' => 72, 'name' => 'Al-Jinn', 'arabicName' => 'الجن', 'totalVerses' => 28, 'grade' => 9, 'semester' => 2],
+        ];
+
+        $totalVersesCompleted = 0;
+        $totalCompletedSurahs = 0;
+        $surahStats = [];
+
+        foreach ($surahs as $surah) {
+            $completedVerses = count($progressMap[$surah['id']] ?? []);
+            $isCompleted = ($completedVerses >= $surah['totalVerses']);
+            $percentage = round(($completedVerses / $surah['totalVerses']) * 100);
+
+            $totalVersesCompleted += $completedVerses;
+            if ($isCompleted) {
+                $totalCompletedSurahs++;
+            }
+
+            $surahStats[] = [
+                'surahId' => $surah['id'],
+                'surahName' => $surah['name'],
+                'arabicName' => $surah['arabicName'],
+                'number' => $surah['number'],
+                'grade' => $surah['grade'],
+                'semester' => $surah['semester'],
+                'totalVerses' => $surah['totalVerses'],
+                'completedVerses' => $completedVerses,
+                'completedVerseList' => $progressMap[$surah['id']] ?? [],
+                'percentage' => $percentage,
+                'isCompleted' => $isCompleted,
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'student' => [
+                'id' => $student->id,
+                'nisn' => $student->nisn,
+                'name' => $student->name,
+                'gender' => $student->gender,
+                'classId' => $student->class_id,
+                'className' => $student->schoolClass->name ?? $student->class_id,
+                'grade' => (int) ($student->schoolClass->grade ?? 0),
+                'waliKelas' => $student->schoolClass->wali_kelas ?? '-',
+            ],
+            'progress' => $progressMap,
+            'summary' => [
+                'totalVersesCompleted' => $totalVersesCompleted,
+                'totalCompletedSurahs' => $totalCompletedSurahs,
+                'surahStats' => $surahStats,
+            ],
+        ]);
+    }
+
     public function importStudents(Request $request)
     {
         $validated = $request->validate([
