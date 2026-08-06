@@ -1,7 +1,7 @@
 import React from 'react';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import {
     CLASSES,
     ClassInfo,
@@ -312,14 +312,6 @@ export default function HafalanSettingsPage({
         setAllStudents(updated);
         saveStudentsToStorage(updated);
 
-        addHistoryLog({
-            studentName: 'Seluruh Siswa',
-            studentNisn: '-',
-            className: currentClassName,
-            action: 'DELETE_STUDENT',
-            actionLabel: `Kosongkan Data Siswa & Hafalan ${currentClassName}`,
-        });
-
         // API Sync to MySQL
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -340,6 +332,7 @@ export default function HafalanSettingsPage({
                 if (data.progress) {
                     saveProgressToStorage(data.progress);
                 }
+                router.reload();
             }
         } catch (err) {
             console.error('Failed to clear class data in MySQL', err);
@@ -349,17 +342,12 @@ export default function HafalanSettingsPage({
     };
 
     const handleConfirmResetAll = async () => {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('hafalan_monitoring_students_v1');
+            localStorage.removeItem('hafalan_monitoring_progress_v1');
+            localStorage.removeItem('hafalan_monitoring_history_v1');
+        }
         setAllStudents([]);
-        saveStudentsToStorage([]);
-        saveProgressToStorage({});
-
-        addHistoryLog({
-            studentName: 'Seluruh Aplikasi',
-            studentNisn: '-',
-            className: 'Semua Kelas',
-            action: 'DELETE_STUDENT',
-            actionLabel: 'Mereset Total Seluruh Data Murid & Riwayat',
-        });
 
         // API Sync to MySQL
         try {
@@ -374,8 +362,12 @@ export default function HafalanSettingsPage({
             const data = await res.json();
             if (data.success) {
                 setAllStudents([]);
-                saveStudentsToStorage([]);
-                saveProgressToStorage({});
+                if (typeof window !== 'undefined') {
+                    localStorage.removeItem('hafalan_monitoring_students_v1');
+                    localStorage.removeItem('hafalan_monitoring_progress_v1');
+                    localStorage.removeItem('hafalan_monitoring_history_v1');
+                }
+                router.reload();
             }
         } catch (err) {
             console.error('Failed to reset all data in MySQL', err);
@@ -385,6 +377,10 @@ export default function HafalanSettingsPage({
     };
 
     const handleConfirmClearHistory = async () => {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('hafalan_monitoring_history_v1');
+        }
+
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             await fetch('/api/hafalan/history/clear', {
@@ -394,6 +390,10 @@ export default function HafalanSettingsPage({
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
             });
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('hafalan_monitoring_history_v1');
+            }
+            router.reload();
         } catch (err) {
             console.error('Failed to clear activity history log in MySQL', err);
         }
