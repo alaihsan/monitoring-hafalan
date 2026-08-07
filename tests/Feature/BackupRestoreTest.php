@@ -312,3 +312,46 @@ test('a backup whose history exceeds the old 20k ceiling still restores', functi
     expect($response->json('restored.history'))->toBeGreaterThan(20000);
     expect(ActivityLog::count())->toBeGreaterThan(20000);
 });
+
+// --- Guard against a truncated/empty backup wiping a populated database -------------
+
+test('a backup with no students is refused while the database still holds students', function () {
+    $response = $this->actingAs($this->user)
+        ->postJson('/api/hafalan/backup/restore', [
+            'password' => 'password',
+            'backup' => ['students' => [], 'progress' => [], 'history' => []],
+        ]);
+
+    $response->assertStatus(422)->assertJsonValidationErrors('students');
+    expect($response->json('errors.students.0'))->toContain('2 murid');
+
+    // Nothing was touched.
+    expect(Student::count())->toBe(2);
+    expect(HafalanProgress::count())->toBe(5);
+    expect(ActivityLog::count())->toBeGreaterThan(0);
+});
+
+test('an empty backup is allowed when the database is already empty', function () {
+    // Restoring an empty snapshot onto an empty system is not data loss.
+    $this->actingAs($this->user)
+        ->postJson('/api/hafalan/reset-all', ['password' => 'password'])
+        ->assertOk();
+
+    $this->actingAs($this->user)
+        ->postJson('/api/hafalan/backup/restore', [
+            'password' => 'password',
+            'backup' => ['students' => []],
+        ])
+        ->assertOk();
+
+    expect(Student::count())->toBe(0);
+});
+
+test('emptying the roster on purpose still works through reset-all', function () {
+    $this->actingAs($this->user)
+        ->postJson('/api/hafalan/reset-all', ['password' => 'password'])
+        ->assertOk();
+
+    expect(Student::count())->toBe(0);
+    expect(HafalanProgress::count())->toBe(0);
+});

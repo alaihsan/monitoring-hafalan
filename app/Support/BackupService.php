@@ -137,6 +137,8 @@ class BackupService
         $history = $this->validateHistory($backup['history'] ?? []);
         $settings = $this->validateSettings($backup['schoolSettings'] ?? []);
 
+        $this->guardAgainstEmptyOverwrite($students);
+
         DB::transaction(function () use ($classes, $students, $progress, $history, $settings) {
             // Order matters: progress and students reference classes by foreign key.
             HafalanProgress::query()->delete();
@@ -178,6 +180,34 @@ class BackupService
             'progress' => count($progress),
             'history' => count($history),
         ];
+    }
+
+    /**
+     * A truncated or mistakenly chosen backup can still be valid JSON while carrying
+     * no students at all. Restoring it would wipe the roster and leave nothing to
+     * recover from, since the file itself is empty. Emptying the data on purpose has
+     * its own dedicated action, so refuse this case rather than take it literally.
+     *
+     * @param  array<int, array<string, mixed>>  $students
+     */
+    private function guardAgainstEmptyOverwrite(array $students): void
+    {
+        if ($students !== []) {
+            return;
+        }
+
+        $existing = Student::count();
+
+        if ($existing === 0) {
+            return;
+        }
+
+        $this->fail('students', sprintf(
+            'File cadangan ini tidak memuat satu pun murid, sedangkan database berisi %d murid. '.
+            'Kemungkinan file rusak atau tidak lengkap. Bila memang ingin mengosongkan data, '.
+            'gunakan menu "Reset & Kosongkan Seluruh Data".',
+            $existing
+        ));
     }
 
     /**
