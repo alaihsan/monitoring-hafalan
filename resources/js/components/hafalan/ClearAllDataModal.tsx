@@ -8,7 +8,7 @@ interface ClearAllDataModalProps {
     isOpen: boolean;
     totalStudentCount: number;
     onClose: () => void;
-    onConfirmResetAll: () => void;
+    onConfirmResetAll: (password: string) => void;
 }
 
 export const ClearAllDataModal: React.FC<ClearAllDataModalProps> = ({
@@ -18,21 +18,24 @@ export const ClearAllDataModal: React.FC<ClearAllDataModalProps> = ({
     onConfirmResetAll,
 }) => {
     const [typedConfirm, setTypedConfirm] = React.useState('');
+    const [password, setPassword] = React.useState('');
 
     React.useEffect(() => {
         setTypedConfirm('');
+        setPassword('');
     }, [isOpen]);
 
     if (!isOpen) return null;
 
     const expectedText = 'RESET SEMUA DATA';
-    const isMatch = typedConfirm.trim().toUpperCase() === expectedText;
+    const isMatch = typedConfirm.trim().toUpperCase() === expectedText && password.length > 0;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (isMatch) {
-            onConfirmResetAll();
-            onClose();
+            // Left open deliberately: the parent closes it once the server confirms,
+            // so a rejected password does not discard what was already typed in.
+            onConfirmResetAll(password);
         }
     };
 
@@ -91,6 +94,20 @@ export const ClearAllDataModal: React.FC<ClearAllDataModalProps> = ({
                         />
                     </div>
 
+
+                    <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-foreground">
+                            Konfirmasi password akun Anda:
+                        </Label>
+                        <Input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Password login Anda"
+                            autoComplete="current-password"
+                            className="bg-background text-xs"
+                        />
+                    </div>
                     <div className="flex gap-2 pt-2">
                         <Button
                             type="button"

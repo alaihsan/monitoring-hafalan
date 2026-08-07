@@ -5,7 +5,6 @@ import { Head } from '@inertiajs/react';
 import {
     HistoryLogItem,
     HistoryActionType,
-    loadHistoryLogs,
 } from '@/data/hafalan-data';
 
 import { History, CheckCircle2, XCircle, Search, Filter, Calendar, UserPlus, Edit3, Trash2, FileSpreadsheet, Settings } from 'lucide-react';
@@ -34,14 +33,16 @@ export default function HafalanHistoryPage({ initialHistory }: HistoryPageProps)
     const [classFilter, setClassFilter] = React.useState<string>('ALL');
 
     React.useEffect(() => {
-        setLogs((initialHistory && initialHistory.length > 0) ? initialHistory : loadHistoryLogs());
+        // Server data only: falling back to a local cache used to show stale entries
+        // (and hide the fact that the real history had been cleared).
+        setLogs(initialHistory ?? []);
     }, [initialHistory]);
 
     // Filter logs
     const filteredLogs = logs.filter((log) => {
         const matchesSearch =
             log.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (log.studentNisn && log.studentNisn.includes(searchQuery)) ||
+            (log.studentNis && log.studentNis.includes(searchQuery)) ||
             (log.surahName && log.surahName.toLowerCase().includes(searchQuery.toLowerCase())) ||
             (log.actionLabel && log.actionLabel.toLowerCase().includes(searchQuery.toLowerCase()));
 
@@ -172,7 +173,7 @@ export default function HafalanHistoryPage({ initialHistory }: HistoryPageProps)
                             <Search className="text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2" />
                             <Input
                                 type="text"
-                                placeholder="Cari nama murid, NISN, atau tindakan..."
+                                placeholder="Cari nama murid, NIS, atau tindakan..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="bg-background pl-9 text-xs"

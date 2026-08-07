@@ -1,21 +1,13 @@
 import React from 'react';
 import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import {
-    CLASSES,
     ClassInfo,
     Surah,
     Student,
     ProgressData,
     SchoolSettings,
-    loadSavedStudents,
-    loadSavedProgress,
-    saveProgressToStorage,
-    loadSavedClasses,
-    saveClassesToStorage,
-    loadSchoolSettings,
-    addHistoryLog,
     getSurahForGradeAndSemester,
 } from '@/data/hafalan-data';
 
@@ -33,28 +25,33 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 interface IndexPageProps {
-    initialClasses?: ClassInfo[];
-    initialStudents?: Student[];
-    initialProgress?: ProgressData;
-    initialSettings?: SchoolSettings;
-    initialHistory?: any[];
+    initialClasses: ClassInfo[];
+    currentClassId: string | null;
+    initialStudents: Student[];
+    initialProgress: ProgressData;
+    initialSettings: SchoolSettings;
 }
 
 export default function HafalanMonitoringPage({
     initialClasses,
+    currentClassId,
     initialStudents,
     initialProgress,
     initialSettings,
 }: IndexPageProps) {
-    // 1. Core State
-    const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
-    const [students, setStudents] = React.useState<Student[]>(initialStudents || []);
-    const [progress, setProgress] = React.useState<ProgressData>(initialProgress || {});
-    const [schoolSettings, setSchoolSettings] = React.useState<SchoolSettings>(
-        initialSettings || { schoolName: '', quranTeacherName: '' }
-    );
+    // The server is the only source of truth. Students and progress arrive already
+    // scoped to the selected class, so there is nothing to hydrate from a local cache.
+    const classes = React.useMemo(() => initialClasses ?? [], [initialClasses]);
+    const students = React.useMemo(() => initialStudents ?? [], [initialStudents]);
+    const schoolSettings = initialSettings ?? { schoolName: '', quranTeacherName: '' };
 
-    const [selectedClassId, setSelectedClassId] = React.useState<string>('7A');
+    // Progress is the one piece kept in state, so a toggle can update optimistically.
+    const [progress, setProgress] = React.useState<ProgressData>(initialProgress ?? {});
+
+    React.useEffect(() => {
+        setProgress(initialProgress ?? {});
+    }, [initialProgress]);
+
     const [selectedSemester, setSelectedSemester] = React.useState<number>(1);
     const [customSurah, setCustomSurah] = React.useState<Surah | null>(null);
 
@@ -64,23 +61,16 @@ export default function HafalanMonitoringPage({
     // Modals
     const [isPrintModalOpen, setIsPrintModalOpen] = React.useState<boolean>(false);
 
-    // Initial Load & LocalStorage Hydration / Props Sync
-    React.useEffect(() => {
-        const loadedStds = (initialStudents && initialStudents.length > 0) ? initialStudents : loadSavedStudents();
-        const savedClasses = (initialClasses && initialClasses.length > 0) ? initialClasses : loadSavedClasses();
-        const savedProg = initialProgress ? initialProgress : loadSavedProgress(loadedStds);
-        const settings = (initialSettings && initialSettings.schoolName) ? initialSettings : loadSchoolSettings();
-
-        setStudents(loadedStds);
-        setClasses(savedClasses);
-        setProgress(savedProg);
-        setSchoolSettings(settings);
-    }, [initialClasses, initialStudents, initialProgress, initialSettings]);
+    // Switching class reloads that class's data from the server rather than
+    // filtering a full in-memory copy of every class.
+    const handleSelectClass = (classId: string) => {
+        router.get('/hafalan', { class: classId }, { preserveScroll: true, preserveState: false });
+    };
 
     // Derived Selected Class & Surah
     const currentClass = React.useMemo(() => {
-        return classes.find((c) => c.id === selectedClassId) || classes[0];
-    }, [classes, selectedClassId]);
+        return classes.find((c) => c.id === currentClassId) || classes[0];
+    }, [classes, currentClassId]);
 
     const currentSurah = React.useMemo(() => {
         if (customSurah && customSurah.grade === currentClass.grade) {
@@ -90,8 +80,9 @@ export default function HafalanMonitoringPage({
     }, [currentClass, selectedSemester, customSurah]);
 
     // Current Class Students
+    // Already scoped server-side; filtered defensively in case props lag a reload.
     const currentClassStudents = React.useMemo(() => {
-        return students.filter((s) => s.classId === currentClass.id);
+        return students.filter((s) => s.classId === currentClass?.id);
     }, [students, currentClass]);
 
     // Calculate Class Progress Metrics
@@ -115,141 +106,103 @@ export default function HafalanMonitoringPage({
         };
     }, [currentClassStudents, progress, currentSurah]);
 
-    // Handlers with Activity Logging & DB API Sync
+    const handleEditWaliKelas = async (classId: string, newWaliKelas: string) => {
+        // Previously this only ever updated the local cache, so the change vanished
+        // on the next load and never reached the database.
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/classes/wali-kelas', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ classes: [{ id: classId, waliKelas: newWaliKelas }] }),
+            });
+
+            if (res.ok) {
+                router.reload({ only: ['initialClasses'] });
+            }
+        } catch (e) {
+            console.error('Failed to update wali kelas', e);
+        }
+    };
+
+    // Handlers: optimistic UI, reconciled against the server's delta response.
+    // Client-side history logging was removed — the server writes the audit trail,
+    // and duplicating it locally produced entries nobody could attribute.
+    const applyVerse = (
+        current: ProgressData,
+        studentId: string,
+        surahId: string,
+        verseNum: number,
+        checked: boolean
+    ): ProgressData => {
+        const studentProg = current[studentId] || {};
+        const surahProg = studentProg[surahId] || [];
+
+        const nextVerses = checked
+            ? (surahProg.includes(verseNum) ? surahProg : [...surahProg, verseNum].sort((a, b) => a - b))
+            : surahProg.filter((v) => v !== verseNum);
+
+        return { ...current, [studentId]: { ...studentProg, [surahId]: nextVerses } };
+    };
+
     const handleToggleVerse = async (studentId: string, surahId: string, verseNum: number) => {
         if (isViewOnly) return;
-        const studentObj = students.find((s) => s.id === studentId);
 
-        // Optimistic UI Update
-        setProgress((prev) => {
-            const studentProg = prev[studentId] || {};
-            const surahProg = studentProg[surahId] || [];
+        const before = progress;
+        const willCheck = !(progress[studentId]?.[surahId] || []).includes(verseNum);
 
-            const isCurrentlyChecked = surahProg.includes(verseNum);
-            let updatedSurahProg: number[];
+        setProgress((prev) => applyVerse(prev, studentId, surahId, verseNum, willCheck));
 
-            if (isCurrentlyChecked) {
-                updatedSurahProg = surahProg.filter((v) => v !== verseNum);
-                if (studentObj) {
-                    addHistoryLog({
-                        studentName: studentObj.name,
-                        studentNisn: studentObj.nisn,
-                        className: currentClass.name,
-                        surahName: currentSurah.name,
-                        verseNum: verseNum,
-                        action: 'UNCHECKED',
-                    });
-                }
-            } else {
-                updatedSurahProg = [...surahProg, verseNum].sort((a, b) => a - b);
-                if (studentObj) {
-                    addHistoryLog({
-                        studentName: studentObj.name,
-                        studentNisn: studentObj.nisn,
-                        className: currentClass.name,
-                        surahName: currentSurah.name,
-                        verseNum: verseNum,
-                        action: 'CHECKED',
-                    });
-                }
-            }
-
-            const next = {
-                ...prev,
-                [studentId]: {
-                    ...studentProg,
-                    [surahId]: updatedSurahProg,
-                },
-            };
-            saveProgressToStorage(next);
-            return next;
-        });
-
-        // API DB Sync
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/toggle-verse', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
-                body: JSON.stringify({
-                    studentId,
-                    surahId,
-                    verseNum,
-                    surahName: currentSurah.name,
-                }),
+                body: JSON.stringify({ studentId, surahId, verseNum, surahName: currentSurah.name }),
             });
-            const data = await res.json();
-            if (data.success && data.progress) {
-                setProgress(data.progress);
-                saveProgressToStorage(data.progress);
+
+            if (!res.ok) {
+                setProgress(before);
+                return;
             }
+
+            const data = await res.json();
+            // Trust the server's answer over the optimistic guess.
+            setProgress((prev) => applyVerse(prev, studentId, surahId, verseNum, data.checked));
         } catch (e) {
-            console.error('Failed to sync toggleVerse to MySQL', e);
+            console.error('Failed to sync toggleVerse', e);
+            setProgress(before);
         }
     };
 
     const handleToggleColumnVerse = async (surahId: string, verseNum: number, check: boolean) => {
         if (isViewOnly) return;
 
-        // Optimistic UI Update
+        const before = progress;
+
         setProgress((prev) => {
-            const next = { ...prev };
-
+            let next = prev;
             currentClassStudents.forEach((s) => {
-                const studentProg = next[s.id] || {};
-                const surahProg = studentProg[surahId] || [];
-
-                let updatedSurahProg: number[];
-                if (check) {
-                    if (!surahProg.includes(verseNum)) {
-                        updatedSurahProg = [...surahProg, verseNum].sort((a, b) => a - b);
-                        addHistoryLog({
-                            studentName: s.name,
-                            studentNisn: s.nisn,
-                            className: currentClass.name,
-                            surahName: currentSurah.name,
-                            verseNum: verseNum,
-                            action: 'CHECKED',
-                        });
-                    } else {
-                        updatedSurahProg = surahProg;
-                    }
-                } else {
-                    if (surahProg.includes(verseNum)) {
-                        updatedSurahProg = surahProg.filter((v) => v !== verseNum);
-                        addHistoryLog({
-                            studentName: s.name,
-                            studentNisn: s.nisn,
-                            className: currentClass.name,
-                            surahName: currentSurah.name,
-                            verseNum: verseNum,
-                            action: 'UNCHECKED',
-                        });
-                    } else {
-                        updatedSurahProg = surahProg;
-                    }
-                }
-
-                next[s.id] = {
-                    ...studentProg,
-                    [surahId]: updatedSurahProg,
-                };
+                next = applyVerse(next, s.id, surahId, verseNum, check);
             });
-
-            saveProgressToStorage(next);
             return next;
         });
 
-        // API DB Sync
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/toggle-column-verse', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
                 body: JSON.stringify({
@@ -259,22 +212,24 @@ export default function HafalanMonitoringPage({
                     surahName: currentSurah.name,
                 }),
             });
-            const data = await res.json();
-            if (data.success && data.progress) {
-                setProgress(data.progress);
-                saveProgressToStorage(data.progress);
-            }
-        } catch (e) {
-            console.error('Failed to sync toggleColumnVerse to MySQL', e);
-        }
-    };
 
-    const handleEditWaliKelas = (classId: string, newWaliKelas: string) => {
-        setClasses((prev) => {
-            const next = prev.map((c) => (c.id === classId ? { ...c, waliKelas: newWaliKelas } : c));
-            saveClassesToStorage(next);
-            return next;
-        });
+            if (!res.ok) {
+                setProgress(before);
+                return;
+            }
+
+            const data = await res.json();
+            setProgress((prev) => {
+                let next = prev;
+                (data.studentIds ?? []).forEach((sid: string) => {
+                    next = applyVerse(next, sid, surahId, verseNum, data.checked);
+                });
+                return next;
+            });
+        } catch (e) {
+            console.error('Failed to sync toggleColumnVerse', e);
+            setProgress(before);
+        }
     };
 
     return (
@@ -300,8 +255,8 @@ export default function HafalanMonitoringPage({
                     selectedClass={currentClass}
                     students={students}
                     onSelectClass={(cls) => {
-                        setSelectedClassId(cls.id);
                         setCustomSurah(null);
+                        handleSelectClass(cls.id);
                     }}
                     selectedSemester={selectedSemester}
                     onSelectSemester={(sem) => {

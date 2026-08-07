@@ -4,7 +4,6 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class HafalanDatabaseSeeder extends Seeder
 {
@@ -37,7 +36,8 @@ class HafalanDatabaseSeeder extends Seeder
         ];
 
         foreach ($classes as $cls) {
-            $token = Str::slug($cls['id']).'_'.substr(md5('hafalan_key_'.$cls['id']), 0, 10);
+            // No share_token is seeded: public links are cryptographically signed URLs
+            // minted on demand (HafalanController::createShareLink), not stored secrets.
             DB::table('classes')->updateOrInsert(
                 ['id' => $cls['id']],
                 [
@@ -45,7 +45,6 @@ class HafalanDatabaseSeeder extends Seeder
                     'grade' => $cls['grade'],
                     'section' => $cls['section'],
                     'wali_kelas' => '',
-                    'share_token' => $token,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]

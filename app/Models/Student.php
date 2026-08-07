@@ -14,9 +14,12 @@ class Student extends Model
 
     protected $keyType = 'string';
 
+    /**
+     * 'id' is deliberately absent: primary keys are server-generated ULIDs, and
+     * leaving it mass-assignable let a request overwrite an unrelated student.
+     */
     protected $fillable = [
-        'id',
-        'nisn',
+        'nis',
         'name',
         'gender',
         'class_id',

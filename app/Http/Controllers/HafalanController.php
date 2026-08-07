@@ -2,25 +2,72 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\Hafalan\ClearClassRequest;
+use App\Http\Requests\Hafalan\ConfirmPasswordRequest;
+use App\Http\Requests\Hafalan\ImportStudentsRequest;
+use App\Http\Requests\Hafalan\RestoreBackupRequest;
+use App\Http\Requests\Hafalan\SaveStudentRequest;
+use App\Http\Requests\Hafalan\ToggleColumnVerseRequest;
+use App\Http\Requests\Hafalan\ToggleVerseRequest;
+use App\Http\Requests\Hafalan\UpdateSettingsRequest;
+use App\Http\Requests\Hafalan\UpdateWaliKelasRequest;
 use App\Models\ActivityLog;
 use App\Models\ClassModel;
 use App\Models\HafalanProgress;
 use App\Models\SchoolSetting;
 use App\Models\Student;
+use App\Support\BackupService;
+use App\Support\SurahCatalog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class HafalanController extends Controller
 {
-    public function index(): Response
+    /**
+     * Share link durations, in minutes. A null value means the link never expires.
+     */
+    private const SHARE_DURATIONS = [
+        '1d' => 1440,
+        '7d' => 10080,
+        '30d' => 43200,
+        'never' => null,
+    ];
+
+    private const SHARE_DURATION_LABELS = [
+        '1d' => 'Berlaku 1 Hari',
+        '7d' => 'Berlaku 7 Hari',
+        '30d' => 'Berlaku 30 Hari',
+        'never' => 'Selamanya (Tidak Ada Batas Waktu)',
+    ];
+
+    /**
+     * The monitoring matrix shows one class at a time, so only that class is loaded.
+     * Previously every request shipped the entire progress table — at full roll
+     * (12 classes x ~30 students x 225 verses) that is ~80k rows per page view.
+     */
+    public function index(Request $request): Response
     {
+        // withCount keeps the class picker's per-class totals accurate now that only
+        // the selected class's students are sent.
+        $classes = ClassModel::withCount('students')->orderBy('id')->get();
+        $currentClass = $classes->firstWhere('id', $request->query('class')) ?? $classes->first();
+
+        $students = $currentClass
+            ? Student::where('class_id', $currentClass->id)->get()
+            : new Collection;
+
         return Inertia::render('hafalan/index', [
-            'initialClasses' => $this->getClassesData(),
-            'initialStudents' => $this->getStudentsData(),
-            'initialProgress' => $this->getProgressData(),
+            'initialClasses' => $this->mapClasses($classes),
+            'currentClassId' => $currentClass?->id,
+            'initialStudents' => $this->mapStudents($students),
+            'initialProgress' => $this->getProgressData($students->pluck('id')->all()),
             'initialSettings' => $this->getSettingsData(),
-            'initialHistory' => $this->getLogsData(),
         ]);
     }
 
@@ -40,162 +87,199 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function share(Request $request): Response
+    /**
+     * Public, read-only report for a single class.
+     *
+     * Reachable only through a signed URL (see createShareLink), so the signature
+     * and its expiry are verified by the `signed` middleware before we get here.
+     * Only the shared class is exposed — never the whole student body.
+     */
+    public function share(ClassModel $class): Response
     {
+        $students = Student::where('class_id', $class->id)->get();
+
         return Inertia::render('hafalan/share', [
-            'initialClasses' => $this->getClassesData(),
-            'initialStudents' => $this->getStudentsData(),
-            'initialProgress' => $this->getProgressData(),
+            'shareClass' => [
+                'id' => $class->id,
+                'name' => $class->name,
+                'grade' => (int) $class->grade,
+                'section' => $class->section,
+                'waliKelas' => $class->wali_kelas,
+            ],
+            'initialStudents' => $this->mapStudents($students),
+            'initialProgress' => $this->getProgressData($students->pluck('id')->all()),
             'initialSettings' => $this->getSettingsData(),
+        ]);
+    }
+
+    /**
+     * Issue a signed, optionally expiring public link for one class.
+     */
+    public function createShareLink(Request $request, ClassModel $class)
+    {
+        $validated = $request->validate([
+            'duration' => ['required', Rule::in(array_keys(self::SHARE_DURATIONS))],
+        ]);
+
+        $minutes = self::SHARE_DURATIONS[$validated['duration']];
+
+        $url = $minutes === null
+            ? URL::signedRoute('hafalan.share', ['class' => $class->id])
+            : URL::temporarySignedRoute('hafalan.share', now()->addMinutes($minutes), ['class' => $class->id]);
+
+        return response()->json([
+            'success' => true,
+            'url' => $url,
+            'expirationText' => self::SHARE_DURATION_LABELS[$validated['duration']],
         ]);
     }
 
     // --- API ENDPOINTS FOR REAL-TIME DB SYNC ---
 
-    public function toggleVerse(Request $request)
+    public function toggleVerse(ToggleVerseRequest $request)
     {
-        $validated = $request->validate([
-            'studentId' => 'required|string',
-            'surahId' => 'required|string',
-            'verseNum' => 'required|integer',
-            'surahName' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
-        $student = Student::with('schoolClass')->find($validated['studentId']);
-
-        $existing = HafalanProgress::where('student_id', $validated['studentId'])
-            ->where('surah_id', $validated['surahId'])
-            ->where('verse_num', $validated['verseNum'])
-            ->first();
-
-        $action = 'CHECKED';
-        $actionLabel = 'Mencentang Hafalan';
-
-        if ($existing) {
-            $existing->delete();
-            $action = 'UNCHECKED';
-            $actionLabel = 'Membatalkan Centang';
-        } else {
-            HafalanProgress::create([
+        $checked = DB::transaction(function () use ($validated) {
+            // firstOrCreate is atomic against the unique index on
+            // (student_id, surah_id, verse_num); the previous read-then-write pair
+            // let two concurrent toggles both decide to insert and trip the
+            // constraint with a 500.
+            $progress = HafalanProgress::firstOrCreate([
                 'student_id' => $validated['studentId'],
                 'surah_id' => $validated['surahId'],
                 'verse_num' => $validated['verseNum'],
             ]);
-        }
 
-        if ($student) {
-            ActivityLog::create([
-                'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
+            if ($progress->wasRecentlyCreated) {
+                $action = 'CHECKED';
+                $actionLabel = 'Mencentang Hafalan';
+            } else {
+                $progress->delete();
+                $action = 'UNCHECKED';
+                $actionLabel = 'Membatalkan Centang';
+            }
+
+            // The student is guaranteed to exist (validated with exists:), so unlike
+            // before, progress can no longer be written without a matching log entry.
+            $student = Student::with('schoolClass')->find($validated['studentId']);
+
+            $this->logActivity([
                 'student_name' => $student->name,
-                'student_nisn' => $student->nisn,
+                'student_nis' => $student->nis,
                 'class_name' => $student->schoolClass->name ?? $student->class_id,
-                'surah_name' => $validated['surahName'] ?? $validated['surahId'],
+                'class_id' => $student->class_id,
+                'surah_name' => $validated['surahName'] ?? SurahCatalog::name($validated['surahId']),
                 'verse_num' => $validated['verseNum'],
                 'action' => $action,
                 'action_label' => $actionLabel,
             ]);
-        }
 
+            return $action === 'CHECKED';
+        });
+
+        // Only the delta the client needs to reconcile its optimistic update.
         return response()->json([
             'success' => true,
-            'progress' => $this->getProgressData(),
-            'history' => $this->getLogsData(),
+            'studentId' => $validated['studentId'],
+            'surahId' => $validated['surahId'],
+            'verseNum' => $validated['verseNum'],
+            'checked' => $checked,
         ]);
     }
 
-    public function toggleColumnVerse(Request $request)
+    public function toggleColumnVerse(ToggleColumnVerseRequest $request)
     {
-        $validated = $request->validate([
-            'classId' => 'required|string',
-            'surahId' => 'required|string',
-            'verseNum' => 'required|integer',
-            'surahName' => 'nullable|string',
-        ]);
+        $validated = $request->validated();
 
-        $class = ClassModel::find($validated['classId']);
-        $students = Student::where('class_id', $validated['classId'])->get();
-        if ($students->isEmpty()) {
-            return response()->json(['success' => true, 'progress' => $this->getProgressData()]);
-        }
+        $result = DB::transaction(function () use ($validated) {
+            $class = ClassModel::find($validated['classId']);
+            $studentIds = Student::where('class_id', $validated['classId'])->pluck('id')->all();
 
-        $studentIds = $students->pluck('id')->toArray();
+            if ($studentIds === []) {
+                return ['checked' => false, 'studentIds' => []];
+            }
 
-        $existingCount = HafalanProgress::whereIn('student_id', $studentIds)
-            ->where('surah_id', $validated['surahId'])
-            ->where('verse_num', $validated['verseNum'])
-            ->count();
-
-        $allChecked = ($existingCount === count($studentIds));
-
-        if ($allChecked) {
-            HafalanProgress::whereIn('student_id', $studentIds)
+            $existingCount = HafalanProgress::whereIn('student_id', $studentIds)
                 ->where('surah_id', $validated['surahId'])
                 ->where('verse_num', $validated['verseNum'])
-                ->delete();
-            $action = 'UNCHECKED';
-            $actionLabel = 'Membatalkan Massal 1 Kolom';
-        } else {
-            foreach ($studentIds as $sid) {
-                HafalanProgress::firstOrCreate([
-                    'student_id' => $sid,
-                    'surah_id' => $validated['surahId'],
-                    'verse_num' => $validated['verseNum'],
-                ]);
-            }
-            $action = 'CHECKED';
-            $actionLabel = 'Mencentang Massal 1 Kolom';
-        }
+                ->count();
 
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => 'Semua Siswa',
-            'student_nisn' => '-',
-            'class_name' => $class->name ?? $validated['classId'],
-            'surah_name' => $validated['surahName'] ?? $validated['surahId'],
-            'verse_num' => $validated['verseNum'],
-            'action' => $action,
-            'action_label' => $actionLabel,
-        ]);
+            if ($existingCount === count($studentIds)) {
+                HafalanProgress::whereIn('student_id', $studentIds)
+                    ->where('surah_id', $validated['surahId'])
+                    ->where('verse_num', $validated['verseNum'])
+                    ->delete();
+                $action = 'UNCHECKED';
+                $actionLabel = 'Membatalkan Massal 1 Kolom';
+            } else {
+                foreach ($studentIds as $sid) {
+                    HafalanProgress::firstOrCreate([
+                        'student_id' => $sid,
+                        'surah_id' => $validated['surahId'],
+                        'verse_num' => $validated['verseNum'],
+                    ]);
+                }
+                $action = 'CHECKED';
+                $actionLabel = 'Mencentang Massal 1 Kolom';
+            }
+
+            $this->logActivity([
+                'student_name' => 'Semua Siswa',
+                'student_nis' => '-',
+                'class_name' => $class->name,
+                'class_id' => $class->id,
+                'surah_name' => $validated['surahName'] ?? SurahCatalog::name($validated['surahId']),
+                'verse_num' => $validated['verseNum'],
+                'action' => $action,
+                'action_label' => $actionLabel,
+            ]);
+
+            return ['checked' => $action === 'CHECKED', 'studentIds' => $studentIds];
+        });
 
         return response()->json([
             'success' => true,
-            'progress' => $this->getProgressData(),
-            'history' => $this->getLogsData(),
+            'classId' => $validated['classId'],
+            'surahId' => $validated['surahId'],
+            'verseNum' => $validated['verseNum'],
+            'checked' => $result['checked'] ?? false,
+            'studentIds' => $result['studentIds'] ?? [],
         ]);
     }
 
-    public function saveStudent(Request $request)
+    public function saveStudent(SaveStudentRequest $request)
     {
-        $validated = $request->validate([
-            'id' => 'nullable|string',
-            'nisn' => 'required|string',
-            'name' => 'required|string',
-            'gender' => 'required|in:L,P',
-            'classId' => 'required|string',
-        ]);
+        $validated = $request->validated();
+        $isEditing = $request->isEditing();
 
-        $studentId = $validated['id'] ?? 'std_'.$validated['classId'].'_'.time().'_'.rand(100, 999);
+        DB::transaction(function () use ($validated, $isEditing) {
+            $student = Student::find($validated['id'] ?? null) ?? new Student;
 
-        $student = Student::updateOrCreate(
-            ['id' => $studentId],
-            [
-                'nisn' => $validated['nisn'],
+            if (! $student->exists) {
+                $student->id = (string) Str::ulid();
+            }
+
+            // A collision-prone time()+rand() id used to let a second student created
+            // in the same second silently overwrite the first via updateOrCreate.
+            $student->fill([
+                'nis' => $validated['nis'],
                 'name' => $validated['name'],
                 'gender' => $validated['gender'],
                 'class_id' => $validated['classId'],
-            ]
-        );
+            ])->save();
 
-        $class = ClassModel::find($validated['classId']);
+            $class = ClassModel::find($validated['classId']);
 
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => $student->name,
-            'student_nisn' => $student->nisn,
-            'class_name' => $class->name ?? $validated['classId'],
-            'action' => isset($validated['id']) ? 'EDIT_STUDENT' : 'ADD_STUDENT',
-            'action_label' => isset($validated['id']) ? 'Mengedit Data Siswa' : 'Menambah Siswa Baru',
-        ]);
+            $this->logActivity([
+                'student_name' => $student->name,
+                'student_nis' => $student->nis,
+                'class_name' => $class->name,
+                'class_id' => $class->id,
+                'action' => $isEditing ? 'EDIT_STUDENT' : 'ADD_STUDENT',
+                'action_label' => $isEditing ? 'Mengedit Data Siswa' : 'Menambah Siswa Baru',
+            ]);
+        });
 
         return response()->json([
             'success' => true,
@@ -204,22 +288,31 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function deleteStudent(string $id)
+    public function deleteStudent(ConfirmPasswordRequest $request, string $id)
     {
+        // Deletion is permanent and takes the student's setoran ayat with it, so it
+        // re-verifies the password like the other destructive endpoints.
         $student = Student::with('schoolClass')->find($id);
 
-        if ($student) {
-            ActivityLog::create([
-                'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
+        if (! $student) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Siswa tidak ditemukan.',
+            ], 404);
+        }
+
+        DB::transaction(function () use ($student) {
+            $this->logActivity([
                 'student_name' => $student->name,
-                'student_nisn' => $student->nisn,
+                'student_nis' => $student->nis,
                 'class_name' => $student->schoolClass->name ?? $student->class_id,
+                'class_id' => $student->class_id,
                 'action' => 'DELETE_STUDENT',
                 'action_label' => 'Menghapus Siswa',
             ]);
 
             $student->delete();
-        }
+        });
 
         return response()->json([
             'success' => true,
@@ -229,38 +322,33 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function clearClassData(Request $request)
+    public function clearClassData(ClearClassRequest $request)
     {
-        $validated = $request->validate([
-            'classId' => 'required|string',
-        ]);
+        $validated = $request->validated();
 
-        $class = ClassModel::find($validated['classId']);
-        $className = $class->name ?? $validated['classId'];
+        DB::transaction(function () use ($validated) {
+            $class = ClassModel::find($validated['classId']);
 
-        $studentIds = Student::where('class_id', $validated['classId'])->pluck('id')->toArray();
-        $studentCount = count($studentIds);
+            $studentIds = Student::where('class_id', $class->id)->pluck('id')->all();
+            $studentCount = count($studentIds);
 
-        // Delete progress
-        HafalanProgress::whereIn('student_id', $studentIds)->delete();
+            HafalanProgress::whereIn('student_id', $studentIds)->delete();
+            Student::where('class_id', $class->id)->delete();
 
-        // Delete students
-        Student::where('class_id', $validated['classId'])->delete();
+            // Scoped by class_id: matching on the display name used to orphan logs
+            // when a class was renamed, and could delete another class's entries whose
+            // name happened to equal this class's id.
+            ActivityLog::where('class_id', $class->id)->delete();
 
-        // Delete activity logs for this class
-        ActivityLog::where('class_name', $className)
-            ->orWhere('class_name', $validated['classId'])
-            ->delete();
-
-        // Log the clear action
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => "Seluruh Data ({$studentCount} Siswa)",
-            'student_nisn' => '-',
-            'class_name' => $className,
-            'action' => 'CLEAR_CLASS',
-            'action_label' => "Kosongkan Data Siswa & Hafalan {$className}",
-        ]);
+            $this->logActivity([
+                'student_name' => "Seluruh Data ({$studentCount} Siswa)",
+                'student_nis' => '-',
+                'class_name' => $class->name,
+                'class_id' => $class->id,
+                'action' => 'CLEAR_CLASS',
+                'action_label' => "Kosongkan Data Siswa & Hafalan {$class->name}",
+            ]);
+        });
 
         return response()->json([
             'success' => true,
@@ -270,24 +358,23 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function clearAllData(Request $request)
+    public function clearAllData(ConfirmPasswordRequest $request)
     {
-        $studentCount = Student::count();
+        DB::transaction(function () {
+            $studentCount = Student::count();
 
-        // Delete all progress, students, and logs
-        HafalanProgress::query()->delete();
-        Student::query()->delete();
-        ActivityLog::query()->delete();
+            HafalanProgress::query()->delete();
+            Student::query()->delete();
+            ActivityLog::query()->delete();
 
-        // Create initial log for clear all action
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => "Seluruh Data Aplikasi ({$studentCount} Siswa)",
-            'student_nisn' => '-',
-            'class_name' => 'Semua Kelas',
-            'action' => 'RESET_ALL',
-            'action_label' => 'Mereset & Mengosongkan Seluruh Data Murid & Riwayat',
-        ]);
+            $this->logActivity([
+                'student_name' => "Seluruh Data Aplikasi ({$studentCount} Siswa)",
+                'student_nis' => '-',
+                'class_name' => 'Semua Kelas',
+                'action' => 'RESET_ALL',
+                'action_label' => 'Mereset & Mengosongkan Seluruh Data Murid & Riwayat',
+            ]);
+        });
 
         return response()->json([
             'success' => true,
@@ -297,20 +384,21 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function clearHistory(Request $request)
+    public function clearHistory(ConfirmPasswordRequest $request)
     {
-        $logCount = ActivityLog::count();
+        DB::transaction(function () {
+            $logCount = ActivityLog::count();
 
-        ActivityLog::query()->delete();
+            ActivityLog::query()->delete();
 
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => "Log Riwayat ({$logCount} Item)",
-            'student_nisn' => '-',
-            'class_name' => 'Sistem',
-            'action' => 'CLEAR_HISTORY',
-            'action_label' => 'Membersihkan Seluruh Riwayat Aktivitas Log',
-        ]);
+            $this->logActivity([
+                'student_name' => "Log Riwayat ({$logCount} Item)",
+                'student_nis' => '-',
+                'class_name' => 'Sistem',
+                'action' => 'CLEAR_HISTORY',
+                'action_label' => 'Membersihkan Seluruh Riwayat Aktivitas Log',
+            ]);
+        });
 
         return response()->json([
             'success' => true,
@@ -318,24 +406,121 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function getStudentDetail(string $idOrNisn)
+    public function importStudents(ImportStudentsRequest $request)
     {
-        $student = Student::with('schoolClass')
-            ->where('id', $idOrNisn)
-            ->orWhere('nisn', $idOrNisn)
-            ->first();
+        $rows = $request->validated()['students'];
+
+        DB::transaction(function () use ($rows) {
+            foreach ($rows as $row) {
+                // Matched on NIS, the school's business key, so re-importing the same
+                // sheet updates those students instead of creating duplicates.
+                $student = Student::firstOrNew(['nis' => $row['nis']]);
+
+                if (! $student->exists) {
+                    $student->id = (string) Str::ulid();
+                }
+
+                $student->fill([
+                    'name' => $row['name'],
+                    'gender' => $row['gender'],
+                    'class_id' => $row['classId'],
+                ])->save();
+            }
+
+            $class = ClassModel::find($rows[0]['classId']);
+
+            $this->logActivity([
+                'student_name' => count($rows).' Siswa',
+                'student_nis' => '-',
+                'class_name' => $class->name,
+                'class_id' => $class->id,
+                'action' => 'IMPORT_STUDENTS',
+                'action_label' => 'Import Data Siswa Massal',
+            ]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'students' => $this->getStudentsData(),
+            'history' => $this->getLogsData(),
+        ]);
+    }
+
+    public function updateSettings(UpdateSettingsRequest $request)
+    {
+        $settings = $request->settingsToPersist();
+
+        if ($settings === []) {
+            return response()->json([
+                'success' => true,
+                'settings' => $this->getSettingsData(),
+                'history' => $this->getLogsData(),
+            ]);
+        }
+
+        DB::transaction(function () use ($settings) {
+            foreach ($settings as $key => $value) {
+                SchoolSetting::updateOrCreate(['key' => $key], ['value' => $value]);
+            }
+
+            $this->logActivity([
+                'student_name' => 'Pengaturan Sekolah',
+                'student_nis' => '-',
+                'class_name' => 'Sistem',
+                'action' => 'UPDATE_SETTINGS',
+                'action_label' => 'Mengubah Pengaturan Sekolah',
+            ]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'settings' => $this->getSettingsData(),
+            'history' => $this->getLogsData(),
+        ]);
+    }
+
+    public function updateWaliKelas(UpdateWaliKelasRequest $request)
+    {
+        $classes = $request->validated()['classes'];
+
+        DB::transaction(function () use ($classes) {
+            foreach ($classes as $cls) {
+                ClassModel::where('id', $cls['id'])->update([
+                    'wali_kelas' => $cls['waliKelas'] ?? '',
+                ]);
+            }
+
+            $this->logActivity([
+                'student_name' => count($classes).' Rombel',
+                'student_nis' => '-',
+                'class_name' => 'Sistem',
+                'action' => 'UPDATE_SETTINGS',
+                'action_label' => 'Mengubah Nama Wali Kelas',
+            ]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'classes' => $this->getClassesData(),
+        ]);
+    }
+
+    public function getStudentDetail(string $idOrNis)
+    {
+        // Resolved id-first rather than with a single orWhere, so a value that happens
+        // to match one student's id and another's NIS returns a deterministic result.
+        $student = Student::with('schoolClass')->find($idOrNis)
+            ?? Student::with('schoolClass')->where('nis', $idOrNis)->first();
 
         if (! $student) {
             return response()->json([
                 'success' => false,
-                'message' => 'Siswa tidak ditemukan dengan ID/NISN: '.$idOrNisn,
+                'message' => 'Siswa tidak ditemukan dengan ID/NIS: '.$idOrNis,
             ], 404);
         }
 
-        $progressRecords = HafalanProgress::where('student_id', $student->id)->get();
-
         $progressMap = [];
-        foreach ($progressRecords as $rec) {
+        foreach (HafalanProgress::where('student_id', $student->id)->get() as $rec) {
             $progressMap[$rec->surah_id][] = (int) $rec->verse_num;
         }
 
@@ -343,23 +528,17 @@ class HafalanController extends Controller
             sort($progressMap[$sId]);
         }
 
-        $surahs = [
-            ['id' => 'al-mursalat', 'number' => 77, 'name' => 'Al-Mursalat', 'arabicName' => 'المرسلات', 'totalVerses' => 50, 'grade' => 7, 'semester' => 1],
-            ['id' => 'al-insan', 'number' => 76, 'name' => 'Al-Insan', 'arabicName' => 'الإنسان', 'totalVerses' => 31, 'grade' => 7, 'semester' => 2],
-            ['id' => 'al-qiyamah', 'number' => 75, 'name' => 'Al-Qiyamah', 'arabicName' => 'القيامة', 'totalVerses' => 40, 'grade' => 8, 'semester' => 1],
-            ['id' => 'al-muddtastsir', 'number' => 74, 'name' => 'Al-Muddaththir', 'arabicName' => 'المدثر', 'totalVerses' => 56, 'grade' => 8, 'semester' => 2],
-            ['id' => 'al-muzzammil', 'number' => 73, 'name' => 'Al-Muzzammil', 'arabicName' => 'المزمل', 'totalVerses' => 20, 'grade' => 9, 'semester' => 1],
-            ['id' => 'al-jin', 'number' => 72, 'name' => 'Al-Jinn', 'arabicName' => 'الجن', 'totalVerses' => 28, 'grade' => 9, 'semester' => 2],
-        ];
-
         $totalVersesCompleted = 0;
         $totalCompletedSurahs = 0;
         $surahStats = [];
 
-        foreach ($surahs as $surah) {
-            $completedVerses = count($progressMap[$surah['id']] ?? []);
-            $isCompleted = ($completedVerses >= $surah['totalVerses']);
-            $percentage = round(($completedVerses / $surah['totalVerses']) * 100);
+        foreach (SurahCatalog::forResponse() as $surah) {
+            $verseList = $progressMap[$surah['id']] ?? [];
+
+            // Clamped because rows stored before verse-range validation existed could
+            // still exceed the surah length and push the percentage past 100.
+            $completedVerses = min(count($verseList), $surah['totalVerses']);
+            $isCompleted = $completedVerses >= $surah['totalVerses'];
 
             $totalVersesCompleted += $completedVerses;
             if ($isCompleted) {
@@ -375,8 +554,8 @@ class HafalanController extends Controller
                 'semester' => $surah['semester'],
                 'totalVerses' => $surah['totalVerses'],
                 'completedVerses' => $completedVerses,
-                'completedVerseList' => $progressMap[$surah['id']] ?? [],
-                'percentage' => $percentage,
+                'completedVerseList' => $verseList,
+                'percentage' => (int) round(($completedVerses / $surah['totalVerses']) * 100),
                 'isCompleted' => $isCompleted,
             ];
         }
@@ -385,7 +564,7 @@ class HafalanController extends Controller
             'success' => true,
             'student' => [
                 'id' => $student->id,
-                'nisn' => $student->nisn,
+                'nis' => $student->nis,
                 'name' => $student->name,
                 'gender' => $student->gender,
                 'classId' => $student->class_id,
@@ -402,142 +581,115 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function importStudents(Request $request)
+    /**
+     * Complete backup: settings, classes, students, setoran ayat, and history.
+     * Built from the database so a backup cannot silently omit data the browser
+     * happened not to have cached.
+     */
+    public function exportData(BackupService $backups)
     {
-        $validated = $request->validate([
-            'students' => 'required|array',
-            'students.*.id' => 'required|string',
-            'students.*.nisn' => 'required|string',
-            'students.*.name' => 'required|string',
-            'students.*.gender' => 'required|in:L,P',
-            'students.*.classId' => 'required|string',
-        ]);
-
-        foreach ($validated['students'] as $s) {
-            Student::updateOrCreate(
-                ['id' => $s['id']],
-                [
-                    'nisn' => $s['nisn'],
-                    'name' => $s['name'],
-                    'gender' => $s['gender'],
-                    'class_id' => $s['classId'],
-                ]
-            );
-        }
-
-        $classId = $validated['students'][0]['classId'] ?? 'Import';
-        $class = ClassModel::find($classId);
-
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => count($validated['students']).' Siswa',
-            'student_nisn' => '-',
-            'class_name' => $class->name ?? $classId,
-            'action' => 'IMPORT_STUDENTS',
-            'action_label' => 'Import Data Siswa Massal',
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'students' => $this->getStudentsData(),
-            'history' => $this->getLogsData(),
-        ]);
+        return response()->json($backups->export());
     }
 
-    public function updateSettings(Request $request)
+    /**
+     * Restore a backup file, replacing everything currently stored.
+     *
+     * Destructive, so it re-verifies the password like the other purge endpoints.
+     * The whole restore runs in one transaction and is validated up front, so an
+     * invalid file leaves the existing data untouched.
+     */
+    public function restoreBackup(RestoreBackupRequest $request, BackupService $backups)
     {
-        $validated = $request->validate([
-            'schoolName' => 'nullable|string',
-            'quranTeacherName' => 'nullable|string',
-        ]);
+        $restored = $backups->restore($request->input('backup'));
 
-        SchoolSetting::updateOrCreate(
-            ['key' => 'school_name'],
-            ['value' => $validated['schoolName'] ?? '']
-        );
-
-        SchoolSetting::updateOrCreate(
-            ['key' => 'quran_teacher_name'],
-            ['value' => $validated['quranTeacherName'] ?? '']
-        );
-
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => 'Pengaturan Sekolah',
-            'student_nisn' => '-',
+        $this->logActivity([
+            'student_name' => "Pemulihan Backup ({$restored['students']} Siswa)",
+            'student_nis' => '-',
             'class_name' => 'Sistem',
-            'action' => 'UPDATE_SETTINGS',
-            'action_label' => 'Mengubah Pengaturan Sekolah',
+            'action' => 'RESTORE_BACKUP',
+            'action_label' => "Memulihkan Backup: {$restored['students']} siswa, "
+                ."{$restored['progress']} setoran ayat, {$restored['history']} baris riwayat",
         ]);
 
         return response()->json([
             'success' => true,
-            'settings' => $this->getSettingsData(),
-            'history' => $this->getLogsData(),
-        ]);
-    }
-
-    public function updateWaliKelas(Request $request)
-    {
-        $validated = $request->validate([
-            'classes' => 'required|array',
-            'classes.*.id' => 'required|string',
-            'classes.*.waliKelas' => 'nullable|string',
-        ]);
-
-        foreach ($validated['classes'] as $cls) {
-            ClassModel::where('id', $cls['id'])->update([
-                'wali_kelas' => $cls['waliKelas'] ?? '',
-            ]);
-        }
-
-        ActivityLog::create([
-            'timestamp_str' => now()->setTimezone('Asia/Jakarta')->translatedFormat('d M Y H:i:s'),
-            'student_name' => 'Wali Kelas 12 Rombel',
-            'student_nisn' => '-',
-            'class_name' => 'Sistem',
-            'action' => 'UPDATE_SETTINGS',
-            'action_label' => 'Mengubah Nama Wali Kelas 12 Rombel',
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'classes' => $this->getClassesData(),
+            'restored' => $restored,
         ]);
     }
 
     // --- HELPER DATA BUILDERS ---
 
+    /**
+     * Write one audit entry. Every log goes through here so the shared fields are
+     * recorded in exactly one place.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function logActivity(array $attributes): void
+    {
+        ActivityLog::create($attributes + [
+            // Records who acted; previously the trail could not attribute a data wipe
+            // to anyone. Nullable so console-driven changes still log.
+            'user_id' => auth()->id(),
+            // Snapshot of the name so the trail survives account deletion and
+            // travelling into another database via a backup restore.
+            'actor_name' => auth()->user()?->name,
+            'logged_at' => now(),
+        ]);
+    }
+
     private function getClassesData(): array
     {
-        return ClassModel::all()->map(function ($c) {
+        return $this->mapClasses(ClassModel::withCount('students')->orderBy('id')->get());
+    }
+
+    /**
+     * @param  Collection<int, ClassModel>  $classes
+     */
+    private function mapClasses($classes): array
+    {
+        return $classes->map(function ($c) {
             return [
                 'id' => $c->id,
                 'name' => $c->name,
                 'grade' => (int) $c->grade,
                 'section' => $c->section,
                 'waliKelas' => $c->wali_kelas,
-                'shareToken' => $c->share_token,
+                'studentCount' => (int) ($c->students_count ?? 0),
             ];
-        })->toArray();
+        })->values()->toArray();
     }
 
     private function getStudentsData(): array
     {
-        return Student::all()->map(function ($s) {
+        return $this->mapStudents(Student::all());
+    }
+
+    /**
+     * @param  Collection<int, Student>  $students
+     */
+    private function mapStudents($students): array
+    {
+        return $students->map(function ($s) {
             return [
                 'id' => $s->id,
-                'nisn' => $s->nisn,
+                'nis' => $s->nis,
                 'name' => $s->name,
                 'gender' => $s->gender,
                 'classId' => $s->class_id,
             ];
-        })->toArray();
+        })->values()->toArray();
     }
 
-    private function getProgressData(): array
+    /**
+     * @param  array<int, string>|null  $studentIds  Limit to these students, or all when null.
+     */
+    private function getProgressData(?array $studentIds = null): array
     {
-        $records = HafalanProgress::all();
+        $records = HafalanProgress::when(
+            $studentIds !== null,
+            fn ($q) => $q->whereIn('student_id', $studentIds)
+        )->get();
         $progress = [];
 
         foreach ($records as $r) {
@@ -565,18 +717,28 @@ class HafalanController extends Controller
 
     private function getLogsData(): array
     {
-        return ActivityLog::orderBy('id', 'desc')->take(200)->get()->map(function ($l) {
-            return [
-                'id' => (string) $l->id,
-                'timestamp' => $l->timestamp_str,
-                'studentName' => $l->student_name,
-                'studentNisn' => $l->student_nisn,
-                'className' => $l->class_name,
-                'surahName' => $l->surah_name,
-                'verseNum' => $l->verse_num ? (int) $l->verse_num : null,
-                'action' => $l->action,
-                'actionLabel' => $l->action_label,
-            ];
-        })->toArray();
+        return ActivityLog::with('user:id,name')
+            ->orderByDesc('logged_at')
+            ->orderByDesc('id')
+            ->take(200)
+            ->get()
+            ->map(function ($l) {
+                return [
+                    'id' => (string) $l->id,
+                    // Formatted for display here; the column itself is a real timestamp
+                    // so it can still be sorted and range-queried.
+                    'timestamp' => $l->logged_at
+                        ?->setTimezone('Asia/Jakarta')
+                        ->translatedFormat('d M Y H:i:s'),
+                    'actorName' => $l->actor_name ?? $l->user?->name,
+                    'studentName' => $l->student_name,
+                    'studentNis' => $l->student_nis,
+                    'className' => $l->class_name,
+                    'surahName' => $l->surah_name,
+                    'verseNum' => $l->verse_num ? (int) $l->verse_num : null,
+                    'action' => $l->action,
+                    'actionLabel' => $l->action_label,
+                ];
+            })->toArray();
     }
 }

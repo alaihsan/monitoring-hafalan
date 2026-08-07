@@ -7,22 +7,15 @@ import {
     ClassInfo,
     Student,
     SchoolSettings,
-    loadSavedClasses,
-    saveClassesToStorage,
-    loadSchoolSettings,
-    saveSchoolSettings,
-    loadSavedProgress,
-    saveProgressToStorage,
-    loadSavedStudents,
-    saveStudentsToStorage,
     parseStudentsFromImportText,
-    addHistoryLog,
+    ParsedStudentRow,
 } from '@/data/hafalan-data';
 
 import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
 import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
 import { ClearHistoryModal } from '@/components/hafalan/ClearHistoryModal';
+import { RestoreBackupModal, BackupSummary } from '@/components/hafalan/RestoreBackupModal';
 import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,11 +55,13 @@ export default function HafalanSettingsPage({
     const [selectedCrudClassId, setSelectedCrudClassId] = React.useState<string>('7A');
 
     // CRUD New Student Form state
-    const [newNisn, setNewNisn] = React.useState<string>('');
+    const [newNis, setNewNis] = React.useState<string>('');
     const [newName, setNewName] = React.useState<string>('');
+    const [newGender, setNewGender] = React.useState<'L' | 'P'>('L');
     const [editingStudentId, setEditingStudentId] = React.useState<string | null>(null);
-    const [editNisn, setEditNisn] = React.useState<string>('');
+    const [editNis, setEditNis] = React.useState<string>('');
     const [editName, setEditName] = React.useState<string>('');
+    const [editGender, setEditGender] = React.useState<'L' | 'P'>('L');
 
     // Delete Modal state
     const [studentToDelete, setStudentToDelete] = React.useState<Student | null>(null);
@@ -77,33 +72,22 @@ export default function HafalanSettingsPage({
 
     // Importer text state
     const [importText, setImportText] = React.useState<string>('');
-    const [parsedPreview, setParsedPreview] = React.useState<Student[]>([]);
-    const [shouldOverwriteImport, setShouldOverwriteImport] = React.useState<boolean>(false);
+    const [parsedPreview, setParsedPreview] = React.useState<ParsedStudentRow[]>([]);
+    const importIssueCount = parsedPreview.filter((r) => r.issues.length > 0).length;
+
+    // Pending backup file, held until the restore is confirmed.
+    const [pendingBackup, setPendingBackup] = React.useState<Record<string, unknown> | null>(null);
+    const [backupSummary, setBackupSummary] = React.useState<BackupSummary | null>(null);
 
     const jsonFileInputRef = React.useRef<HTMLInputElement>(null);
     const excelFileInputRef = React.useRef<HTMLInputElement>(null);
 
+    // Server props only. The old localStorage fallback made the page show stale
+    // students after a real deletion, hiding data loss instead of surfacing it.
     React.useEffect(() => {
-        if (initialSettings) {
-            setSchoolSettingsState(initialSettings);
-            saveSchoolSettings(initialSettings);
-        } else {
-            setSchoolSettingsState(loadSchoolSettings());
-        }
-
-        if (initialClasses && initialClasses.length > 0) {
-            setClasses(initialClasses);
-            saveClassesToStorage(initialClasses);
-        } else {
-            setClasses(loadSavedClasses());
-        }
-
-        if (initialStudents) {
-            setAllStudents(initialStudents);
-            saveStudentsToStorage(initialStudents);
-        } else {
-            setAllStudents(loadSavedStudents());
-        }
+        setSchoolSettingsState(initialSettings ?? { schoolName: '', quranTeacherName: '' });
+        setClasses(initialClasses ?? []);
+        setAllStudents(initialStudents ?? []);
     }, [initialSettings, initialClasses, initialStudents]);
 
     const showToast = (msg: string) => {
@@ -111,19 +95,18 @@ export default function HafalanSettingsPage({
         setTimeout(() => setSavedNotification(null), 4000);
     };
 
+    // Surfaces the server's validation message instead of silently swallowing a 422.
+    const reportApiError = async (res: Response, fallback: string) => {
+        const problem = await res.json().catch(() => null);
+        const firstError = problem?.errors ? Object.values(problem.errors)[0] : null;
+        showToast(Array.isArray(firstError) && firstError[0] ? String(firstError[0]) : fallback);
+    };
+
     const currentCrudClass = classes.find(c => c.id === selectedCrudClassId);
     const currentClassName = currentCrudClass ? currentCrudClass.name : selectedCrudClassId;
 
     const handleSaveSchoolInfo = async (e: React.FormEvent) => {
         e.preventDefault();
-        saveSchoolSettings(schoolSettings);
-        addHistoryLog({
-            studentName: 'Pengaturan Sekolah',
-            studentNisn: '-',
-            className: '-',
-            action: 'UPDATE_SETTINGS',
-            actionLabel: 'Ubah Pengaturan Identitas Sekolah & Guru Mapel',
-        });
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -138,7 +121,6 @@ export default function HafalanSettingsPage({
             const data = await res.json();
             if (data.success && data.settings) {
                 setSchoolSettingsState(data.settings);
-                saveSchoolSettings(data.settings);
                 router.reload();
             }
         } catch (err) {
@@ -148,24 +130,13 @@ export default function HafalanSettingsPage({
         showToast('Pengaturan Sekolah & Guru Mapel berhasil disimpan!');
     };
 
+    // Local edit state; persisted when the form is submitted.
     const handleUpdateWaliKelas = (classId: string, name: string) => {
-        setClasses((prev) => {
-            const next = prev.map((c) => (c.id === classId ? { ...c, waliKelas: name } : c));
-            saveClassesToStorage(next);
-            return next;
-        });
+        setClasses((prev) => prev.map((c) => (c.id === classId ? { ...c, waliKelas: name } : c)));
     };
 
     const handleSaveAllWaliKelas = async (e: React.FormEvent) => {
         e.preventDefault();
-        saveClassesToStorage(classes);
-        addHistoryLog({
-            studentName: 'Wali Kelas 12 Rombel',
-            studentNisn: '-',
-            className: '-',
-            action: 'UPDATE_SETTINGS',
-            actionLabel: 'Ubah Nama Wali Kelas 12 Rombel',
-        });
 
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
@@ -180,7 +151,6 @@ export default function HafalanSettingsPage({
             const data = await res.json();
             if (data.success && data.classes) {
                 setClasses(data.classes);
-                saveClassesToStorage(data.classes);
                 router.reload();
             }
         } catch (err) {
@@ -198,264 +168,236 @@ export default function HafalanSettingsPage({
     // Student CRUD Handlers
     const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newName.trim()) {
-            alert('Nama murid tidak boleh kosong.');
+
+        // No fabricated values: a blank NIS used to be filled with a made-up number
+        // and gender was always hard-coded to 'L'.
+        if (!newName.trim() || !newNis.trim()) {
+            showToast('NIS dan nama murid wajib diisi.');
             return;
         }
 
-        const currentDataset = loadSavedStudents();
-        const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
-
-        const newStudentObj: Student = {
-            id: `std_${selectedCrudClassId}_${Date.now()}`,
-            nisn: newNisn.trim() || `0089${selectedCrudClassId}${Date.now().toString().slice(-4)}`,
-            name: newName.trim(),
-            gender: 'L',
-            classId: selectedCrudClassId,
-        };
-
-        const updated = [...baseStudents, newStudentObj];
-        setAllStudents(updated);
-        saveStudentsToStorage(updated);
-
-        addHistoryLog({
-            studentName: newStudentObj.name,
-            studentNisn: newStudentObj.nisn,
-            className: currentClassName,
-            action: 'ADD_STUDENT',
-            actionLabel: 'Tambah Murid Baru',
-        });
-
-        // API Sync to MySQL
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/students', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                // No client-generated id: the server mints the primary key.
                 body: JSON.stringify({
-                    id: newStudentObj.id,
-                    nisn: newStudentObj.nisn,
-                    name: newStudentObj.name,
-                    gender: newStudentObj.gender,
-                    classId: newStudentObj.classId,
+                    nis: newNis.trim(),
+                    name: newName.trim(),
+                    gender: newGender,
+                    classId: selectedCrudClassId,
                 }),
             });
-            const data = await res.json();
-            if (data.success && data.students) {
-                setAllStudents(data.students);
-                saveStudentsToStorage(data.students);
-            }
-        } catch (err) {
-            console.error('Failed to sync new student to MySQL', err);
-        }
 
-        setNewNisn('');
-        setNewName('');
-        showToast(`Berhasil menambah murid ${newStudentObj.name} ke ${currentClassName}!`);
+            if (!res.ok) {
+                await reportApiError(res, `Gagal menambah murid (HTTP ${res.status}).`);
+                return;
+            }
+
+            const data = await res.json();
+            setAllStudents(data.students);
+            setNewNis('');
+            setNewName('');
+            setNewGender('L');
+            router.reload();
+            showToast('Murid baru berhasil ditambahkan!');
+        } catch (err) {
+            console.error('Failed to add student', err);
+            showToast('Gagal menghubungi server. Murid tidak ditambahkan.');
+        }
     };
 
     const handleStartEditStudent = (st: Student) => {
         setEditingStudentId(st.id);
-        setEditNisn(st.nisn);
+        setEditNis(st.nis);
         setEditName(st.name);
+        setEditGender(st.gender);
     };
 
     const handleSaveEditStudent = async (studentId: string) => {
-        if (!editName.trim()) {
-            alert('Nama murid tidak boleh kosong.');
+        if (!editName.trim() || !editNis.trim()) {
+            showToast('NIS dan nama murid wajib diisi.');
             return;
         }
 
-        const currentDataset = loadSavedStudents();
-        const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
-
-        const updated = baseStudents.map((s) => {
-            if (s.id === studentId) {
-                return { ...s, nisn: editNisn.trim(), name: editName.trim() };
-            }
-            return s;
-        });
-
-        setAllStudents(updated);
-        saveStudentsToStorage(updated);
-        setEditingStudentId(null);
-
-        const targetStudent = updated.find(s => s.id === studentId);
-
-        addHistoryLog({
-            studentName: editName.trim(),
-            studentNisn: editNisn.trim(),
-            className: currentClassName,
-            action: 'EDIT_STUDENT',
-            actionLabel: 'Edit Data Murid',
-        });
-
-        // API Sync to MySQL
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            if (targetStudent) {
-                const res = await fetch('/api/hafalan/students', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': csrfToken || '',
-                    },
-                    body: JSON.stringify({
-                        id: targetStudent.id,
-                        nisn: targetStudent.nisn,
-                        name: targetStudent.name,
-                        gender: targetStudent.gender,
-                        classId: targetStudent.classId,
-                    }),
-                });
-                const data = await res.json();
-                if (data.success && data.students) {
-                    setAllStudents(data.students);
-                    saveStudentsToStorage(data.students);
-                }
-            }
-        } catch (err) {
-            console.error('Failed to sync edited student to MySQL', err);
-        }
+            const res = await fetch('/api/hafalan/students', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({
+                    id: studentId,
+                    nis: editNis.trim(),
+                    name: editName.trim(),
+                    gender: editGender,
+                    classId: selectedCrudClassId,
+                }),
+            });
 
-        showToast('Data murid berhasil diperbarui!');
+            if (!res.ok) {
+                await reportApiError(res, `Gagal memperbarui murid (HTTP ${res.status}).`);
+                return;
+            }
+
+            const data = await res.json();
+            setAllStudents(data.students);
+            setEditingStudentId(null);
+            router.reload();
+            showToast('Data murid berhasil diperbarui!');
+        } catch (err) {
+            console.error('Failed to update student', err);
+            showToast('Gagal menghubungi server. Data tidak diperbarui.');
+        }
     };
 
-    const handleConfirmDeleteStudent = async (studentId: string) => {
-        const currentDataset = loadSavedStudents();
-        const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
-        const deletedStudent = baseStudents.find(s => s.id === studentId);
-
-        const updated = baseStudents.filter((s) => s.id !== studentId);
-        setAllStudents(updated);
-        saveStudentsToStorage(updated);
-
-        if (deletedStudent) {
-            addHistoryLog({
-                studentName: deletedStudent.name,
-                studentNisn: deletedStudent.nisn,
-                className: currentClassName,
-                action: 'DELETE_STUDENT',
-                actionLabel: 'Hapus Murid',
-            });
-        }
-
-        // API Sync to MySQL
+    const handleConfirmDeleteStudent = async (studentId: string, password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch(`/api/hafalan/students/${studentId}`, {
                 method: 'DELETE',
                 headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                body: JSON.stringify({ password }),
             });
-            const data = await res.json();
-            if (data.success && data.students) {
-                setAllStudents(data.students);
-                saveStudentsToStorage(data.students);
-            }
-        } catch (err) {
-            console.error('Failed to sync student deletion to MySQL', err);
-        }
 
-        showToast('Data murid berhasil dihapus!');
+            if (!res.ok) {
+                // Modal stays open so the exact student name already typed is kept.
+                await reportApiError(res, `Gagal menghapus murid (HTTP ${res.status}).`);
+                return;
+            }
+
+            const data = await res.json();
+            setAllStudents(data.students);
+            setIsDeleteModalOpen(false);
+            router.reload();
+            showToast('Data murid berhasil dihapus!');
+        } catch (err) {
+            console.error('Failed to delete student', err);
+            showToast('Gagal menghubungi server. Murid tidak dihapus.');
+        }
     };
 
-    const handleConfirmClearClass = async (classId: string) => {
-        const updated = allStudents.filter((s) => s.classId !== classId);
-        setAllStudents(updated);
-        saveStudentsToStorage(updated);
-
-        // API Sync to MySQL
+    const handleConfirmClearClass = async (classId: string, password: string) => {
+        // Local state is only updated after the server confirms the delete, so a
+        // rejected password can never make the UI look like data was removed.
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/classes/clear', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
-                body: JSON.stringify({ classId }),
+                body: JSON.stringify({ classId, password }),
             });
-            const data = await res.json();
-            if (data.success) {
-                if (data.students) {
-                    setAllStudents(data.students);
-                    saveStudentsToStorage(data.students);
-                }
-                if (data.progress) {
-                    saveProgressToStorage(data.progress);
-                }
-                router.reload();
-            }
-        } catch (err) {
-            console.error('Failed to clear class data in MySQL', err);
-        }
 
-        showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Data tidak dihapus.'
+                        : `Gagal menghapus data (HTTP ${res.status}).`
+                );
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Gagal menghapus data kelas.');
+                return;
+            }
+
+            if (data.students) {
+                setAllStudents(data.students);
+            }
+            setIsClearClassModalOpen(false);
+            router.reload();
+            showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
+        } catch (err) {
+            console.error('Failed to clear class data', err);
+            showToast('Gagal menghubungi server. Data tidak dihapus.');
+        }
     };
 
-    const handleConfirmResetAll = async () => {
-        if (typeof window !== 'undefined') {
-            localStorage.removeItem('hafalan_monitoring_students_v1');
-            localStorage.removeItem('hafalan_monitoring_progress_v1');
-            localStorage.removeItem('hafalan_monitoring_history_v1');
-        }
-        setAllStudents([]);
-
-        // API Sync to MySQL
+    const handleConfirmResetAll = async (password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/reset-all', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                body: JSON.stringify({ password }),
             });
-            const data = await res.json();
-            if (data.success) {
-                setAllStudents([]);
-                if (typeof window !== 'undefined') {
-                    localStorage.removeItem('hafalan_monitoring_students_v1');
-                    localStorage.removeItem('hafalan_monitoring_progress_v1');
-                    localStorage.removeItem('hafalan_monitoring_history_v1');
-                }
-                router.reload();
-            }
-        } catch (err) {
-            console.error('Failed to reset all data in MySQL', err);
-        }
 
-        showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Data tidak direset.'
+                        : `Gagal mereset data (HTTP ${res.status}).`
+                );
+                return;
+            }
+
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Gagal mereset data aplikasi.');
+                return;
+            }
+
+            setAllStudents([]);
+            setIsClearAllModalOpen(false);
+            router.reload();
+            showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
+        } catch (err) {
+            console.error('Failed to reset all data', err);
+            showToast('Gagal menghubungi server. Data tidak direset.');
+        }
     };
 
-    const handleConfirmClearHistory = async () => {
-        if (typeof window !== 'undefined') {
-            localStorage.removeItem('hafalan_monitoring_history_v1');
-        }
-
+    const handleConfirmClearHistory = async (password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-            await fetch('/api/hafalan/history/clear', {
+            const res = await fetch('/api/hafalan/history/clear', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
+                body: JSON.stringify({ password }),
             });
-            if (typeof window !== 'undefined') {
-                localStorage.removeItem('hafalan_monitoring_history_v1');
-            }
-            router.reload();
-        } catch (err) {
-            console.error('Failed to clear activity history log in MySQL', err);
-        }
 
-        showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
+            if (!res.ok) {
+                showToast(
+                    res.status === 422
+                        ? 'Password salah. Riwayat tidak dihapus.'
+                        : `Gagal membersihkan riwayat (HTTP ${res.status}).`
+                );
+                return;
+            }
+
+            setIsClearHistoryModalOpen(false);
+            router.reload();
+            showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
+        } catch (err) {
+            console.error('Failed to clear activity history log', err);
+            showToast('Gagal menghubungi server. Riwayat tidak dihapus.');
+        }
     };
 
     // Importer text handler
@@ -482,112 +424,173 @@ export default function HafalanSettingsPage({
     };
 
     const handleApplyImportedStudents = async () => {
+        const invalidRows = parsedPreview.filter((r) => r.issues.length > 0);
+
         if (parsedPreview.length === 0) {
-            alert('Tidak ada data murid yang siap diimpor.');
+            showToast('Tidak ada data murid yang siap diimpor.');
             return;
         }
 
-        const currentDataset = loadSavedStudents();
-        const baseStudents = currentDataset.length >= allStudents.length ? currentDataset : allStudents;
-
-        let updatedStudents: Student[];
-        if (shouldOverwriteImport) {
-            // Overwrite mode: replace class students
-            const otherClassesStudents = baseStudents.filter(s => s.classId !== selectedCrudClassId);
-            updatedStudents = [...otherClassesStudents, ...parsedPreview];
-        } else {
-            // Append mode (DEFAULT): merge parsed students into current class
-            updatedStudents = [...baseStudents, ...parsedPreview];
+        // Rows are never imported partially-guessed: every row must carry a real NIS,
+        // name and gender before anything is sent.
+        if (invalidRows.length > 0) {
+            showToast(`${invalidRows.length} baris belum lengkap. Perbaiki dulu sebelum impor.`);
+            return;
         }
 
-        setAllStudents(updatedStudents);
-        saveStudentsToStorage(updatedStudents);
-
-        addHistoryLog({
-            studentName: `${parsedPreview.length} Murid`,
-            studentNisn: '-',
-            className: currentClassName,
-            action: 'IMPORT_STUDENTS',
-            actionLabel: shouldOverwriteImport ? `Impor & Timpa Data (${parsedPreview.length} Siswa)` : `Impor & Gabung Data (${parsedPreview.length} Siswa)`,
-        });
-
-        // API Sync to MySQL
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch('/api/hafalan/students/import', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    Accept: 'application/json',
                     'X-CSRF-TOKEN': csrfToken || '',
                 },
                 body: JSON.stringify({
-                    students: parsedPreview,
+                    students: parsedPreview.map((r) => ({
+                        nis: r.nis,
+                        name: r.name,
+                        gender: r.gender,
+                        classId: r.classId,
+                    })),
                 }),
             });
-            const data = await res.json();
-            if (data.success && data.students) {
-                setAllStudents(data.students);
-                saveStudentsToStorage(data.students);
+
+            if (!res.ok) {
+                const problem = await res.json().catch(() => null);
+                const firstError = problem?.errors ? Object.values(problem.errors)[0] : null;
+                showToast(
+                    Array.isArray(firstError) && firstError[0]
+                        ? String(firstError[0])
+                        : `Gagal mengimpor data (HTTP ${res.status}).`
+                );
+                return;
             }
+
+            const data = await res.json();
+            if (!data.success) {
+                showToast('Gagal mengimpor data murid.');
+                return;
+            }
+
+            setAllStudents(data.students);
+            setImportText('');
+            setParsedPreview([]);
+            router.reload();
+            showToast(`Berhasil mengimpor ${parsedPreview.length} murid ke ${currentClassName}!`);
         } catch (err) {
-            console.error('Failed to sync imported students to MySQL', err);
+            console.error('Failed to import students', err);
+            showToast('Gagal menghubungi server. Data tidak diimpor.');
         }
-
-        setImportText('');
-        setParsedPreview([]);
-        setShouldOverwriteImport(false);
-        showToast(`Berhasil mengimpor ${parsedPreview.length} murid ke ${currentClassName}!`);
     };
 
-    const handleExportJSON = () => {
-        const progress = loadSavedProgress(allStudents);
+    // Backup is built server-side so it always contains the real progress data,
+    // not whatever the browser happened to have cached.
+    const handleExportJSON = async () => {
+        try {
+            const res = await fetch('/api/hafalan/export', { headers: { Accept: 'application/json' } });
+            if (!res.ok) {
+                showToast(`Gagal membuat backup (HTTP ${res.status}).`);
+                return;
+            }
 
-        const exportData = {
-            schoolSettings,
-            classes,
-            students: allStudents,
-            progress,
-            exportedAt: new Date().toISOString(),
-        };
-
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `backup_hafalan_quran_${new Date().toISOString().slice(0, 10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
+            const exportData = await res.json();
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `backup_hafalan_quran_${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error('Failed to export data', err);
+            showToast('Gagal menghubungi server. Backup tidak dibuat.');
+        }
     };
 
+    // Reads a backup file and stages it; nothing is written until the confirmation
+    // modal is satisfied. Previously this path only updated React state and reported
+    // success without saving anything at all.
     const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
+        e.target.value = '';
         if (!file) return;
 
         const reader = new FileReader();
         reader.onload = (event) => {
+            let parsed: Record<string, unknown>;
+
             try {
-                const parsed = JSON.parse(event.target?.result as string);
-                if (parsed.schoolSettings) {
-                    setSchoolSettingsState(parsed.schoolSettings);
-                    saveSchoolSettings(parsed.schoolSettings);
-                }
-                if (parsed.classes) {
-                    setClasses(parsed.classes);
-                    saveClassesToStorage(parsed.classes);
-                }
-                if (parsed.students) {
-                    setAllStudents(parsed.students);
-                    saveStudentsToStorage(parsed.students);
-                }
-                if (parsed.progress) {
-                    saveProgressToStorage(parsed.progress);
-                }
-                showToast('Data hafalan JSON berhasil diimpor!');
-            } catch (err) {
-                alert('Gagal membaca file JSON. Format tidak valid.');
+                parsed = JSON.parse(event.target?.result as string);
+            } catch {
+                showToast('Gagal membaca file JSON. Format tidak valid.');
+                return;
             }
+
+            const students = Array.isArray(parsed?.students) ? parsed.students : null;
+            if (!students) {
+                showToast('File ini bukan backup Monitoring Hafalan (tidak memuat data murid).');
+                return;
+            }
+
+            const progress = (parsed?.progress ?? {}) as Record<string, Record<string, number[]>>;
+            const verseCount = Object.values(progress).reduce(
+                (total, surahs) =>
+                    total + Object.values(surahs ?? {}).reduce((n, verses) => n + (verses?.length ?? 0), 0),
+                0
+            );
+
+            setPendingBackup(parsed);
+            setBackupSummary({
+                fileName: file.name,
+                exportedAt: typeof parsed?.exportedAt === 'string'
+                    ? new Date(parsed.exportedAt).toLocaleString('id-ID')
+                    : null,
+                students: students.length,
+                progress: verseCount,
+                history: Array.isArray(parsed?.history) ? parsed.history.length : 0,
+                classes: Array.isArray(parsed?.classes) ? parsed.classes.length : 0,
+            });
         };
+
         reader.readAsText(file);
+    };
+
+    const handleConfirmRestore = async (password: string) => {
+        if (!pendingBackup) return;
+
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/backup/restore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ password, backup: pendingBackup }),
+            });
+
+            if (!res.ok) {
+                // The server validates the file's interior and names the offending
+                // row, so surface that rather than a generic failure.
+                await reportApiError(res, `Gagal memulihkan backup (HTTP ${res.status}).`);
+                return;
+            }
+
+            const data = await res.json();
+            setPendingBackup(null);
+            setBackupSummary(null);
+            router.reload();
+            showToast(
+                `Backup dipulihkan: ${data.restored.students} murid, ` +
+                `${data.restored.progress} setoran ayat, ${data.restored.history} baris riwayat.`
+            );
+        } catch (err) {
+            console.error('Failed to restore backup', err);
+            showToast('Gagal menghubungi server. Data tidak diubah.');
+        }
     };
 
     return (
@@ -691,16 +694,27 @@ export default function HafalanSettingsPage({
                         <div className="text-xs font-extrabold text-foreground flex items-center gap-1.5">
                             <Plus className="size-4 text-emerald-600" /> Tambah Murid Baru ke {currentClassName}:
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                             <div>
-                                <Label className="text-[11px] text-muted-foreground">NISN / Nomor Induk:</Label>
+                                <Label className="text-[11px] text-muted-foreground">NIS / Nomor Induk:</Label>
                                 <Input
                                     type="text"
-                                    value={newNisn}
-                                    onChange={(e) => setNewNisn(e.target.value)}
+                                    value={newNis}
+                                    onChange={(e) => setNewNis(e.target.value)}
                                     placeholder="Contoh: 8021021"
                                     className="bg-background text-xs font-mono"
                                 />
+                            </div>
+                            <div>
+                                <Label className="text-[11px] text-muted-foreground">Jenis Kelamin:</Label>
+                                <select
+                                    value={newGender}
+                                    onChange={(e) => setNewGender(e.target.value as 'L' | 'P')}
+                                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-xs font-semibold"
+                                >
+                                    <option value="L">L - Laki-laki</option>
+                                    <option value="P">P - Perempuan</option>
+                                </select>
                             </div>
                             <div className="md:col-span-2">
                                 <Label className="text-[11px] text-muted-foreground">Nama Lengkap Murid:</Label>
@@ -731,7 +745,7 @@ export default function HafalanSettingsPage({
                                 <thead className="sticky top-0 bg-muted text-foreground font-bold border-b border-border">
                                     <tr>
                                         <th className="p-2.5 w-10 text-center">No</th>
-                                        <th className="p-2.5 w-32">NISN</th>
+                                        <th className="p-2.5 w-32">NIS</th>
                                         <th className="p-2.5">Nama Murid</th>
                                         <th className="p-2.5 w-24 text-center">Aksi CRUD</th>
                                     </tr>
@@ -753,24 +767,38 @@ export default function HafalanSettingsPage({
                                                         {isEditing ? (
                                                             <Input
                                                                 type="text"
-                                                                value={editNisn}
-                                                                onChange={(e) => setEditNisn(e.target.value)}
+                                                                value={editNis}
+                                                                onChange={(e) => setEditNis(e.target.value)}
                                                                 className="h-7 text-xs font-mono"
                                                             />
                                                         ) : (
-                                                            st.nisn
+                                                            st.nis
                                                         )}
                                                     </td>
                                                     <td className="p-2 font-bold">
                                                         {isEditing ? (
-                                                            <Input
-                                                                type="text"
-                                                                value={editName}
-                                                                onChange={(e) => setEditName(e.target.value)}
-                                                                className="h-7 text-xs font-bold"
-                                                            />
+                                                            <div className="flex gap-1.5">
+                                                                <Input
+                                                                    type="text"
+                                                                    value={editName}
+                                                                    onChange={(e) => setEditName(e.target.value)}
+                                                                    className="h-7 text-xs font-bold flex-1"
+                                                                />
+                                                                <select
+                                                                    value={editGender}
+                                                                    onChange={(e) => setEditGender(e.target.value as 'L' | 'P')}
+                                                                    className="h-7 rounded-md border border-input bg-background px-1.5 text-xs font-semibold"
+                                                                    aria-label="Jenis kelamin"
+                                                                >
+                                                                    <option value="L">L</option>
+                                                                    <option value="P">P</option>
+                                                                </select>
+                                                            </div>
                                                         ) : (
-                                                            st.name
+                                                            <span>
+                                                                {st.name}
+                                                                <span className="ml-1.5 text-[10px] font-mono text-muted-foreground">({st.gender})</span>
+                                                            </span>
                                                         )}
                                                     </td>
                                                     <td className="p-2 text-center">
@@ -866,35 +894,33 @@ export default function HafalanSettingsPage({
 
                                     {/* Safe Append vs Overwrite Option */}
                                     <div className="flex items-center gap-2">
-                                        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none text-foreground font-semibold">
-                                            <input
-                                                type="checkbox"
-                                                checked={shouldOverwriteImport}
-                                                onChange={(e) => setShouldOverwriteImport(e.target.checked)}
-                                                className="rounded border-border text-rose-600 focus:ring-rose-500 size-3.5"
-                                            />
-                                            <span className={shouldOverwriteImport ? 'text-rose-600 font-extrabold' : 'text-muted-foreground'}>
-                                                Timpa / Hapus murid lama di {currentClassName}
-                                            </span>
-                                        </label>
+                                        <span className="text-[11px] text-muted-foreground">
+                                            Baris dicocokkan berdasarkan NIS: siswa yang NIS-nya sudah ada akan
+                                            diperbarui, bukan diduplikasi. Untuk mengosongkan kelas lebih dulu,
+                                            gunakan &quot;Kosongkan Data Kelas&quot;.
+                                        </span>
 
                                         <Button
                                             onClick={handleApplyImportedStudents}
+                                            disabled={importIssueCount > 0}
                                             className={`font-bold text-xs h-9 ${
-                                                shouldOverwriteImport
-                                                    ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                                importIssueCount > 0
+                                                    ? 'bg-muted text-muted-foreground cursor-not-allowed'
                                                     : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                             }`}
                                         >
-                                            {shouldOverwriteImport ? 'Timpa & Simpan ke ' + currentClassName : 'Gabungkan & Simpan ke ' + currentClassName}
+                                            Simpan {parsedPreview.length} Murid ke {currentClassName}
                                         </Button>
                                     </div>
                                 </div>
 
-                                {shouldOverwriteImport && (
+                                {importIssueCount > 0 && (
                                     <div className="flex items-center gap-2 text-[11px] text-rose-600 font-bold bg-rose-50 dark:bg-rose-950/40 p-2 rounded-lg border border-rose-200">
                                         <AlertCircle className="size-4 shrink-0" />
-                                        <span>PERINGATAN: Mode timpa aktif. Seluruh murid lama di {currentClassName} akan digantikan oleh {parsedPreview.length} murid baru ini.</span>
+                                        <span>
+                                            {importIssueCount} baris belum lengkap. Setiap baris wajib memuat NIS,
+                                            nama, dan jenis kelamin (L/P). Lengkapi teks lalu tempel ulang.
+                                        </span>
                                     </div>
                                 )}
 
@@ -903,16 +929,31 @@ export default function HafalanSettingsPage({
                                         <thead>
                                             <tr className="border-b border-border text-muted-foreground font-bold">
                                                 <th className="p-1.5 w-10 text-center">No</th>
-                                                <th className="p-1.5 w-32">NISN</th>
-                                                <th className="p-1.5">Nama Murid (Hanya Nama)</th>
+                                                <th className="p-1.5 w-32">NIS</th>
+                                                <th className="p-1.5">Nama Murid</th>
+                                                <th className="p-1.5 w-12 text-center">JK</th>
+                                                <th className="p-1.5 w-56">Status</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {parsedPreview.map((st, idx) => (
-                                                <tr key={idx} className="border-b border-border/40 hover:bg-muted/40">
+                                                <tr
+                                                    key={idx}
+                                                    className={`border-b border-border/40 ${
+                                                        st.issues.length > 0 ? 'bg-rose-50 dark:bg-rose-950/30' : 'hover:bg-muted/40'
+                                                    }`}
+                                                >
                                                     <td className="p-1.5 text-center font-medium">{idx + 1}</td>
-                                                    <td className="p-1.5 font-mono text-[11px]">{st.nisn}</td>
-                                                    <td className="p-1.5 font-bold">{st.name}</td>
+                                                    <td className="p-1.5 font-mono text-[11px]">{st.nis || '—'}</td>
+                                                    <td className="p-1.5 font-bold">{st.name || '—'}</td>
+                                                    <td className="p-1.5 text-center font-mono">{st.gender ?? '—'}</td>
+                                                    <td className="p-1.5 text-[11px]">
+                                                        {st.issues.length === 0 ? (
+                                                            <span className="text-emerald-600 font-semibold">Siap</span>
+                                                        ) : (
+                                                            <span className="text-rose-600 font-semibold">{st.issues.join(', ')}</span>
+                                                        )}
+                                                    </td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -972,18 +1013,21 @@ export default function HafalanSettingsPage({
                 <div className="bg-card text-card-foreground border-border rounded-xl border p-6 shadow-sm space-y-4">
                     <div className="flex items-center justify-between border-b border-border/80 pb-3">
                         <div>
-                            <h2 className="text-base font-extrabold text-foreground">Cadangkan & Pemulihan Data (JSON)</h2>
-                            <p className="text-xs text-muted-foreground">Unduh atau pulihkan seluruh data monitoring hafalan ke file JSON.</p>
+                            <h2 className="text-base font-extrabold text-foreground">Cadangkan &amp; Pemulihan Data (JSON)</h2>
+                            <p className="text-xs text-muted-foreground">
+                                File cadangan memuat identitas sekolah, wali kelas, data murid (NIS, nama,
+                                jenis kelamin), seluruh setoran ayat, dan riwayat aktivitas.
+                            </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
                         <Button onClick={handleExportJSON} variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 text-xs h-10 font-bold">
-                            <Download className="size-4 mr-2" /> Ekspor Data JSON
+                            <Download className="size-4 mr-2" /> Unduh Cadangan Lengkap
                         </Button>
 
                         <Button onClick={() => jsonFileInputRef.current?.click()} variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-400 hover:bg-blue-50 text-xs h-10 font-bold">
-                            <Upload className="size-4 mr-2" /> Impor Data JSON
+                            <Upload className="size-4 mr-2" /> Pulihkan dari Cadangan
                         </Button>
 
                         <Button onClick={() => setIsClearHistoryModalOpen(true)} variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-50 text-xs h-10 font-bold">
@@ -1025,6 +1069,18 @@ export default function HafalanSettingsPage({
                 totalStudentCount={allStudents.length}
                 onClose={() => setIsClearAllModalOpen(false)}
                 onConfirmResetAll={handleConfirmResetAll}
+            />
+
+            {/* Restore Backup Confirmation Modal */}
+            <RestoreBackupModal
+                isOpen={backupSummary !== null}
+                summary={backupSummary}
+                currentStudentCount={allStudents.length}
+                onClose={() => {
+                    setPendingBackup(null);
+                    setBackupSummary(null);
+                }}
+                onConfirmRestore={handleConfirmRestore}
             />
 
             {/* Clear History Log Confirmation Modal */}

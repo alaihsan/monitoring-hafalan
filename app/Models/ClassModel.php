@@ -20,7 +20,6 @@ class ClassModel extends Model
         'grade',
         'section',
         'wali_kelas',
-        'share_token',
     ];
 
     public function students()

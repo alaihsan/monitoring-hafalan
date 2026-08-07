@@ -89,7 +89,7 @@ export const BatchActionModal: React.FC<BatchActionModalProps> = ({
                         <option value="ALL">🌟 Seluruh Murid {currentClass.name} ({students.length} Siswa)</option>
                         {students.map((s) => (
                             <option key={s.id} value={s.id}>
-                                👤 {s.name} (NISN: {s.nisn})
+                                👤 {s.name} (NIS: {s.nis})
                             </option>
                         ))}
                     </select>

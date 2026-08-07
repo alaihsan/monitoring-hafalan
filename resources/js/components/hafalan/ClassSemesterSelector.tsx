@@ -107,7 +107,7 @@ export const ClassSemesterSelector: React.FC<ClassSemesterSelectorProps> = ({
                     <div className="flex flex-wrap gap-2">
                         {filteredClasses.map((cls) => {
                             const isSelected = cls.id === selectedClass.id;
-                            const classStudentCount = students ? students.filter((s) => s.classId === cls.id).length : 0;
+                            const classStudentCount = cls.studentCount ?? (students ? students.filter((s) => s.classId === cls.id).length : 0);
 
                             return (
                                 <button

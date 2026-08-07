@@ -31,7 +31,7 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
     const filteredStudents = students.filter((student) => {
         const matchesSearch =
             student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            student.nisn.includes(searchQuery);
+            student.nis.includes(searchQuery);
 
         const studentVerses = progress[student.id]?.[surah.id] || [];
         const isCompleted = studentVerses.length === totalVerses;
@@ -110,10 +110,10 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
                                 No
                             </th>
 
-                            {/* Sticky Column 2: NISN (Only shown when not in View-Only mode) */}
+                            {/* Sticky Column 2: NIS (Only shown when not in View-Only mode) */}
                             {!isViewOnly && (
                                 <th className="sticky left-10 z-30 bg-muted/95 px-3 py-3 font-bold min-w-[90px] border-r border-border">
-                                    NISN
+                                    NIS
                                 </th>
                             )}
 
@@ -184,10 +184,10 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
                                             {idx + 1}
                                         </td>
 
-                                        {/* Sticky Col 2: NISN (Hidden in View-Only) */}
+                                        {/* Sticky Col 2: NIS (Hidden in View-Only) */}
                                         {!isViewOnly && (
                                             <td className="sticky left-10 z-10 bg-card px-3 py-2.5 font-mono text-[11px] text-muted-foreground border-r border-border">
-                                                {student.nisn}
+                                                {student.nis}
                                             </td>
                                         )}
 

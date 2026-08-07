@@ -6,17 +6,13 @@ use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
-use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use Illuminate\Support\Facades\Route;
 
+// NOTE: public self-registration is intentionally disabled. This is an internal school
+// application where every account has full write access to student records, so accounts
+// are provisioned by an administrator via `php artisan hafalan:create-user`.
 Route::middleware('guest')->group(function () {
-    Route::get('register', [RegisteredUserController::class, 'create'])
-        ->name('register');
-
-    Route::post('register', [RegisteredUserController::class, 'store'])
-        ->middleware('throttle:6,1');
-
     Route::get('login', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
 
