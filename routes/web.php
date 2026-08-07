@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Route;
 Route::get('/share/hafalan/{class}', [HafalanController::class, 'share'])
     ->middleware(['signed', 'throttle:30,1'])
     ->name('hafalan.share');
+Route::get('/share/hafalan/{class}/students/{idOrNis}', [HafalanController::class, 'getSharedStudentDetail'])
+    ->middleware(['signed', 'throttle:30,1'])
+    ->name('hafalan.share.students.detail');
 
 // Protected admin routes requiring login & rate-limited (60 requests/min)
 Route::middleware(['auth', 'throttle:60,1'])->group(function () {
