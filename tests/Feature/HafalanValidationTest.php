@@ -301,7 +301,9 @@ test('deleting a student removes them and their progress permanently', function 
         'student_id' => 'std_7a_1', 'surah_id' => 'al-mursalat', 'verse_num' => 1,
     ]);
 
-    $this->actingAs($this->user)->deleteJson('/api/hafalan/students/std_7a_1')->assertOk();
+    $this->actingAs($this->user)
+        ->deleteJson('/api/hafalan/students/std_7a_1', ['password' => 'password'])
+        ->assertOk();
 
     expect(Student::count())->toBe(0);
     // Cascade takes the progress with it; nothing is left behind to restore.
@@ -309,7 +311,9 @@ test('deleting a student removes them and their progress permanently', function 
 });
 
 test('a deleted NIS becomes immediately reusable', function () {
-    $this->actingAs($this->user)->deleteJson('/api/hafalan/students/std_7a_1')->assertOk();
+    $this->actingAs($this->user)
+        ->deleteJson('/api/hafalan/students/std_7a_1', ['password' => 'password'])
+        ->assertOk();
 
     $this->actingAs($this->user)
         ->postJson('/api/hafalan/students', [
@@ -335,4 +339,33 @@ test('clearing a class purges students outright so their NIS can be reused', fun
             'nis' => '1001', 'name' => 'Siswa Baru', 'gender' => 'L', 'classId' => '7A',
         ])
         ->assertOk();
+});
+
+test('deleting a student requires the current password', function () {
+    HafalanProgress::create([
+        'student_id' => 'std_7a_1', 'surah_id' => 'al-mursalat', 'verse_num' => 1,
+    ]);
+
+    $this->actingAs($this->user)
+        ->deleteJson('/api/hafalan/students/std_7a_1', ['password' => 'salah'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('password');
+
+    $this->actingAs($this->user)
+        ->deleteJson('/api/hafalan/students/std_7a_1')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('password');
+
+    // Nothing removed, and the setoran ayat is still intact.
+    expect(Student::count())->toBe(1);
+    expect(HafalanProgress::count())->toBe(1);
+});
+
+test('guests cannot delete a student', function () {
+    auth()->logout();
+
+    $this->deleteJson('/api/hafalan/students/std_7a_1', ['password' => 'password'])
+        ->assertUnauthorized();
+
+    expect(Student::count())->toBe(1);
 });

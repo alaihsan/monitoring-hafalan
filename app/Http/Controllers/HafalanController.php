@@ -288,8 +288,10 @@ class HafalanController extends Controller
         ]);
     }
 
-    public function deleteStudent(string $id)
+    public function deleteStudent(ConfirmPasswordRequest $request, string $id)
     {
+        // Deletion is permanent and takes the student's setoran ayat with it, so it
+        // re-verifies the password like the other destructive endpoints.
         $student = Student::with('schoolClass')->find($id);
 
         if (! $student) {

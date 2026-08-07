@@ -10,7 +10,7 @@ interface DeleteStudentModalProps {
     student: Student | null;
     className?: string;
     onClose: () => void;
-    onConfirmDelete: (studentId: string) => void;
+    onConfirmDelete: (studentId: string, password: string) => void;
 }
 
 export const DeleteStudentModal: React.FC<DeleteStudentModalProps> = ({
@@ -21,20 +21,23 @@ export const DeleteStudentModal: React.FC<DeleteStudentModalProps> = ({
     onConfirmDelete,
 }) => {
     const [typedName, setTypedName] = React.useState('');
+    const [password, setPassword] = React.useState('');
 
     React.useEffect(() => {
         setTypedName('');
+        setPassword('');
     }, [student, isOpen]);
 
     if (!isOpen || !student) return null;
 
-    const isMatch = typedName === student.name;
+    const isMatch = typedName === student.name && password.length > 0;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (isMatch) {
-            onConfirmDelete(student.id);
-            onClose();
+            // Left open deliberately: the parent closes it on success, so a rejected
+            // password does not throw away the exact student name just typed in.
+            onConfirmDelete(student.id, password);
         }
     };
 
@@ -80,6 +83,14 @@ export const DeleteStudentModal: React.FC<DeleteStudentModalProps> = ({
                     )}
                 </div>
 
+                <div className="flex items-start gap-2 text-[11px] text-rose-600 font-bold bg-rose-50 dark:bg-rose-950/40 p-3 rounded-lg border border-rose-200 dark:border-rose-900">
+                    <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                    <span>
+                        Seluruh setoran ayat murid ini ikut terhapus permanen dan tidak bisa
+                        dipulihkan. Gunakan &quot;Unduh Cadangan Lengkap&quot; lebih dulu bila ragu.
+                    </span>
+                </div>
+
                 {/* Confirmation Input Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-1.5">
@@ -96,6 +107,20 @@ export const DeleteStudentModal: React.FC<DeleteStudentModalProps> = ({
                             placeholder="Ketik nama murid secara persis..."
                             className="bg-background text-xs font-bold"
                             autoFocus
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-foreground">
+                            Konfirmasi password akun Anda:
+                        </Label>
+                        <Input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Password login Anda"
+                            autoComplete="current-password"
+                            className="bg-background text-xs"
                         />
                     </div>
 

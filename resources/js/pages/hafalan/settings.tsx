@@ -259,21 +259,28 @@ export default function HafalanSettingsPage({
         }
     };
 
-    const handleConfirmDeleteStudent = async (studentId: string) => {
+    const handleConfirmDeleteStudent = async (studentId: string, password: string) => {
         try {
             const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
             const res = await fetch(`/api/hafalan/students/${studentId}`, {
                 method: 'DELETE',
-                headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrfToken || '' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ password }),
             });
 
             if (!res.ok) {
+                // Modal stays open so the exact student name already typed is kept.
                 await reportApiError(res, `Gagal menghapus murid (HTTP ${res.status}).`);
                 return;
             }
 
             const data = await res.json();
             setAllStudents(data.students);
+            setIsDeleteModalOpen(false);
             router.reload();
             showToast('Data murid berhasil dihapus!');
         } catch (err) {
