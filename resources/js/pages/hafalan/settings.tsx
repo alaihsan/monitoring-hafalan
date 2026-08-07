@@ -15,6 +15,7 @@ import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
 import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
 import { ClearHistoryModal } from '@/components/hafalan/ClearHistoryModal';
+import { RestoreBackupModal, BackupSummary } from '@/components/hafalan/RestoreBackupModal';
 import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -73,6 +74,10 @@ export default function HafalanSettingsPage({
     const [importText, setImportText] = React.useState<string>('');
     const [parsedPreview, setParsedPreview] = React.useState<ParsedStudentRow[]>([]);
     const importIssueCount = parsedPreview.filter((r) => r.issues.length > 0).length;
+
+    // Pending backup file, held until the restore is confirmed.
+    const [pendingBackup, setPendingBackup] = React.useState<Record<string, unknown> | null>(null);
+    const [backupSummary, setBackupSummary] = React.useState<BackupSummary | null>(null);
 
     const jsonFileInputRef = React.useRef<HTMLInputElement>(null);
     const excelFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -502,66 +507,88 @@ export default function HafalanSettingsPage({
         }
     };
 
-    // Restores the student roster from a backup file. This previously only updated
-    // React state and reported success, so nothing was ever actually saved.
-    // Note: hafalan progress is not restored by this path.
+    // Reads a backup file and stages it; nothing is written until the confirmation
+    // modal is satisfied. Previously this path only updated React state and reported
+    // success without saving anything at all.
     const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
+        e.target.value = '';
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = async (event) => {
-            let students: Array<{ nis?: string; name?: string; gender?: string; classId?: string }>;
+        reader.onload = (event) => {
+            let parsed: Record<string, unknown>;
 
             try {
-                const parsed = JSON.parse(event.target?.result as string);
-                students = Array.isArray(parsed?.students) ? parsed.students : [];
+                parsed = JSON.parse(event.target?.result as string);
             } catch {
                 showToast('Gagal membaca file JSON. Format tidak valid.');
                 return;
             }
 
-            if (students.length === 0) {
-                showToast('File backup tidak memuat data murid.');
+            const students = Array.isArray(parsed?.students) ? parsed.students : null;
+            if (!students) {
+                showToast('File ini bukan backup Monitoring Hafalan (tidak memuat data murid).');
                 return;
             }
 
-            try {
-                const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
-                const res = await fetch('/api/hafalan/students/import', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Accept: 'application/json',
-                        'X-CSRF-TOKEN': csrfToken || '',
-                    },
-                    body: JSON.stringify({
-                        students: students.map((st) => ({
-                            nis: st.nis,
-                            name: st.name,
-                            gender: st.gender,
-                            classId: st.classId,
-                        })),
-                    }),
-                });
+            const progress = (parsed?.progress ?? {}) as Record<string, Record<string, number[]>>;
+            const verseCount = Object.values(progress).reduce(
+                (total, surahs) =>
+                    total + Object.values(surahs ?? {}).reduce((n, verses) => n + (verses?.length ?? 0), 0),
+                0
+            );
 
-                if (!res.ok) {
-                    await reportApiError(res, `Gagal memulihkan backup (HTTP ${res.status}).`);
-                    return;
-                }
-
-                const data = await res.json();
-                setAllStudents(data.students);
-                router.reload();
-                showToast(`${students.length} murid berhasil dipulihkan dari backup.`);
-            } catch (err) {
-                console.error('Failed to restore backup', err);
-                showToast('Gagal menghubungi server. Backup tidak dipulihkan.');
-            }
+            setPendingBackup(parsed);
+            setBackupSummary({
+                fileName: file.name,
+                exportedAt: typeof parsed?.exportedAt === 'string'
+                    ? new Date(parsed.exportedAt).toLocaleString('id-ID')
+                    : null,
+                students: students.length,
+                progress: verseCount,
+                history: Array.isArray(parsed?.history) ? parsed.history.length : 0,
+                classes: Array.isArray(parsed?.classes) ? parsed.classes.length : 0,
+            });
         };
 
         reader.readAsText(file);
-        e.target.value = '';
+    };
+
+    const handleConfirmRestore = async (password: string) => {
+        if (!pendingBackup) return;
+
+        try {
+            const csrfToken = (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content;
+            const res = await fetch('/api/hafalan/backup/restore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': csrfToken || '',
+                },
+                body: JSON.stringify({ password, backup: pendingBackup }),
+            });
+
+            if (!res.ok) {
+                // The server validates the file's interior and names the offending
+                // row, so surface that rather than a generic failure.
+                await reportApiError(res, `Gagal memulihkan backup (HTTP ${res.status}).`);
+                return;
+            }
+
+            const data = await res.json();
+            setPendingBackup(null);
+            setBackupSummary(null);
+            router.reload();
+            showToast(
+                `Backup dipulihkan: ${data.restored.students} murid, ` +
+                `${data.restored.progress} setoran ayat, ${data.restored.history} baris riwayat.`
+            );
+        } catch (err) {
+            console.error('Failed to restore backup', err);
+            showToast('Gagal menghubungi server. Data tidak diubah.');
+        }
     };
 
     return (
@@ -984,18 +1011,21 @@ export default function HafalanSettingsPage({
                 <div className="bg-card text-card-foreground border-border rounded-xl border p-6 shadow-sm space-y-4">
                     <div className="flex items-center justify-between border-b border-border/80 pb-3">
                         <div>
-                            <h2 className="text-base font-extrabold text-foreground">Cadangkan & Pemulihan Data (JSON)</h2>
-                            <p className="text-xs text-muted-foreground">Unduh atau pulihkan seluruh data monitoring hafalan ke file JSON.</p>
+                            <h2 className="text-base font-extrabold text-foreground">Cadangkan &amp; Pemulihan Data (JSON)</h2>
+                            <p className="text-xs text-muted-foreground">
+                                File cadangan memuat identitas sekolah, wali kelas, data murid (NIS, nama,
+                                jenis kelamin), seluruh setoran ayat, dan riwayat aktivitas.
+                            </p>
                         </div>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
                         <Button onClick={handleExportJSON} variant="outline" className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 text-xs h-10 font-bold">
-                            <Download className="size-4 mr-2" /> Ekspor Data JSON
+                            <Download className="size-4 mr-2" /> Unduh Cadangan Lengkap
                         </Button>
 
                         <Button onClick={() => jsonFileInputRef.current?.click()} variant="outline" className="border-blue-500/40 text-blue-700 dark:text-blue-400 hover:bg-blue-50 text-xs h-10 font-bold">
-                            <Upload className="size-4 mr-2" /> Impor Data JSON
+                            <Upload className="size-4 mr-2" /> Pulihkan dari Cadangan
                         </Button>
 
                         <Button onClick={() => setIsClearHistoryModalOpen(true)} variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-400 hover:bg-amber-50 text-xs h-10 font-bold">
@@ -1037,6 +1067,18 @@ export default function HafalanSettingsPage({
                 totalStudentCount={allStudents.length}
                 onClose={() => setIsClearAllModalOpen(false)}
                 onConfirmResetAll={handleConfirmResetAll}
+            />
+
+            {/* Restore Backup Confirmation Modal */}
+            <RestoreBackupModal
+                isOpen={backupSummary !== null}
+                summary={backupSummary}
+                currentStudentCount={allStudents.length}
+                onClose={() => {
+                    setPendingBackup(null);
+                    setBackupSummary(null);
+                }}
+                onConfirmRestore={handleConfirmRestore}
             />
 
             {/* Clear History Log Confirmation Modal */}

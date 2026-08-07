@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Hafalan\ClearClassRequest;
 use App\Http\Requests\Hafalan\ConfirmPasswordRequest;
 use App\Http\Requests\Hafalan\ImportStudentsRequest;
+use App\Http\Requests\Hafalan\RestoreBackupRequest;
 use App\Http\Requests\Hafalan\SaveStudentRequest;
 use App\Http\Requests\Hafalan\ToggleColumnVerseRequest;
 use App\Http\Requests\Hafalan\ToggleVerseRequest;
@@ -15,6 +16,7 @@ use App\Models\ClassModel;
 use App\Models\HafalanProgress;
 use App\Models\SchoolSetting;
 use App\Models\Student;
+use App\Support\BackupService;
 use App\Support\SurahCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -252,17 +254,10 @@ class HafalanController extends Controller
         $isEditing = $request->isEditing();
 
         DB::transaction(function () use ($validated, $isEditing) {
-            $student = Student::find($validated['id'] ?? null)
-                // Re-adding a student whose NIS belongs to a soft-deleted record
-                // restores that record, keeping their hafalan history, instead of
-                // failing on the unique index.
-                ?? Student::onlyTrashed()->where('nis', $validated['nis'])->first()
-                ?? new Student;
+            $student = Student::find($validated['id'] ?? null) ?? new Student;
 
             if (! $student->exists) {
                 $student->id = (string) Str::ulid();
-            } elseif ($student->trashed()) {
-                $student->restore();
             }
 
             // A collision-prone time()+rand() id used to let a second student created
@@ -335,11 +330,8 @@ class HafalanController extends Controller
             $studentIds = Student::where('class_id', $class->id)->pluck('id')->all();
             $studentCount = count($studentIds);
 
-            // forceDelete, not soft delete: this is an explicit password-confirmed
-            // purge. Soft-deleted rows would keep reserving their NIS and block a
-            // re-import of the same class.
             HafalanProgress::whereIn('student_id', $studentIds)->delete();
-            Student::where('class_id', $class->id)->forceDelete();
+            Student::where('class_id', $class->id)->delete();
 
             // Scoped by class_id: matching on the display name used to orphan logs
             // when a class was renamed, and could delete another class's entries whose
@@ -370,7 +362,7 @@ class HafalanController extends Controller
             $studentCount = Student::count();
 
             HafalanProgress::query()->delete();
-            Student::query()->forceDelete();
+            Student::query()->delete();
             ActivityLog::query()->delete();
 
             $this->logActivity([
@@ -588,17 +580,38 @@ class HafalanController extends Controller
     }
 
     /**
-     * Full dataset for the backup/export button. Built from the database so a backup
-     * cannot silently omit progress the browser happened not to have cached.
+     * Complete backup: settings, classes, students, setoran ayat, and history.
+     * Built from the database so a backup cannot silently omit data the browser
+     * happened not to have cached.
      */
-    public function exportData()
+    public function exportData(BackupService $backups)
     {
+        return response()->json($backups->export());
+    }
+
+    /**
+     * Restore a backup file, replacing everything currently stored.
+     *
+     * Destructive, so it re-verifies the password like the other purge endpoints.
+     * The whole restore runs in one transaction and is validated up front, so an
+     * invalid file leaves the existing data untouched.
+     */
+    public function restoreBackup(RestoreBackupRequest $request, BackupService $backups)
+    {
+        $restored = $backups->restore($request->input('backup'));
+
+        $this->logActivity([
+            'student_name' => "Pemulihan Backup ({$restored['students']} Siswa)",
+            'student_nis' => '-',
+            'class_name' => 'Sistem',
+            'action' => 'RESTORE_BACKUP',
+            'action_label' => "Memulihkan Backup: {$restored['students']} siswa, "
+                ."{$restored['progress']} setoran ayat, {$restored['history']} baris riwayat",
+        ]);
+
         return response()->json([
-            'schoolSettings' => $this->getSettingsData(),
-            'classes' => $this->getClassesData(),
-            'students' => $this->getStudentsData(),
-            'progress' => $this->getProgressData(),
-            'exportedAt' => now()->toIso8601String(),
+            'success' => true,
+            'restored' => $restored,
         ]);
     }
 
@@ -616,6 +629,9 @@ class HafalanController extends Controller
             // Records who acted; previously the trail could not attribute a data wipe
             // to anyone. Nullable so console-driven changes still log.
             'user_id' => auth()->id(),
+            // Snapshot of the name so the trail survives account deletion and
+            // travelling into another database via a backup restore.
+            'actor_name' => auth()->user()?->name,
             'logged_at' => now(),
         ]);
     }
@@ -712,7 +728,7 @@ class HafalanController extends Controller
                     'timestamp' => $l->logged_at
                         ?->setTimezone('Asia/Jakarta')
                         ->translatedFormat('d M Y H:i:s'),
-                    'actorName' => $l->user?->name,
+                    'actorName' => $l->actor_name ?? $l->user?->name,
                     'studentName' => $l->student_name,
                     'studentNis' => $l->student_nis,
                     'className' => $l->class_name,

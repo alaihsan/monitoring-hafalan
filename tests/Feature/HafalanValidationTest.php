@@ -294,9 +294,9 @@ test('clearing a class removes only that class\'s logs even after a rename', fun
     expect(ActivityLog::where('class_id', '8B')->where('action', 'CHECKED')->count())->toBe(1);
 });
 
-// --- D-17: recoverable individual deletion ------------------------------------------
+// --- Deletion is permanent ---------------------------------------------------------
 
-test('deleting a student is recoverable and keeps their progress', function () {
+test('deleting a student removes them and their progress permanently', function () {
     HafalanProgress::create([
         'student_id' => 'std_7a_1', 'surah_id' => 'al-mursalat', 'verse_num' => 1,
     ]);
@@ -304,26 +304,23 @@ test('deleting a student is recoverable and keeps their progress', function () {
     $this->actingAs($this->user)->deleteJson('/api/hafalan/students/std_7a_1')->assertOk();
 
     expect(Student::count())->toBe(0);
-    expect(Student::withTrashed()->count())->toBe(1);
-    expect(HafalanProgress::count())->toBe(1);
+    // Cascade takes the progress with it; nothing is left behind to restore.
+    expect(HafalanProgress::count())->toBe(0);
 });
 
-test('re-adding a deleted student by NIS restores them with their history', function () {
-    HafalanProgress::create([
-        'student_id' => 'std_7a_1', 'surah_id' => 'al-mursalat', 'verse_num' => 1,
-    ]);
-
+test('a deleted NIS becomes immediately reusable', function () {
     $this->actingAs($this->user)->deleteJson('/api/hafalan/students/std_7a_1')->assertOk();
 
     $this->actingAs($this->user)
         ->postJson('/api/hafalan/students', [
-            'nis' => '1001', 'name' => 'Ahmad Fulan', 'gender' => 'L', 'classId' => '7A',
+            'nis' => '1001', 'name' => 'Murid Pengganti', 'gender' => 'P', 'classId' => '7A',
         ])
         ->assertOk();
 
     expect(Student::count())->toBe(1);
-    expect(Student::first()->id)->toBe('std_7a_1');
-    expect(HafalanProgress::where('student_id', 'std_7a_1')->count())->toBe(1);
+    expect(Student::first()->name)->toBe('Murid Pengganti');
+    // A fresh record, not a resurrected one.
+    expect(Student::first()->id)->not->toBe('std_7a_1');
 });
 
 test('clearing a class purges students outright so their NIS can be reused', function () {
@@ -331,7 +328,7 @@ test('clearing a class purges students outright so their NIS can be reused', fun
         ->postJson('/api/hafalan/classes/clear', ['classId' => '7A', 'password' => 'password'])
         ->assertOk();
 
-    expect(Student::withTrashed()->count())->toBe(0);
+    expect(Student::count())->toBe(0);
 
     $this->actingAs($this->user)
         ->postJson('/api/hafalan/students', [

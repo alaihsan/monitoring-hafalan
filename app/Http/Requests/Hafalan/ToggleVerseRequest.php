@@ -12,7 +12,7 @@ class ToggleVerseRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'studentId' => ['required', 'string', Rule::exists('students', 'id')->whereNull('deleted_at')],
+            'studentId' => ['required', 'string', Rule::exists('students', 'id')],
             'surahId' => ['required', 'string', Rule::in(SurahCatalog::ids())],
             'verseNum' => ['required', 'integer', 'min:1'],
             'surahName' => ['nullable', 'string', 'max:100'],
