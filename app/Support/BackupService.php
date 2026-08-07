@@ -27,7 +27,11 @@ class BackupService
 
     private const MAX_STUDENTS = 5000;
 
-    private const MAX_HISTORY = 20000;
+    // Must stay comfortably above anything export() can produce: one log row is
+    // written per verse toggle, so a school running for years accumulates far more
+    // than a few thousand. A cap lower than that would emit backups the application
+    // then refuses to accept back.
+    private const MAX_HISTORY = 200000;
 
     // Guards against a file large enough to exhaust memory during restore.
     private const MAX_PROGRESS_ENTRIES = 400000;
@@ -59,19 +63,38 @@ class BackupService
                 'classId' => $s->class_id,
             ])->all(),
             'progress' => $this->exportProgress(),
-            'history' => ActivityLog::orderBy('id')->get()->map(fn ($l) => [
-                'loggedAt' => $l->logged_at?->toIso8601String(),
-                'actorName' => $l->actor_name,
-                'studentName' => $l->student_name,
-                'studentNis' => $l->student_nis,
-                'className' => $l->class_name,
-                'classId' => $l->class_id,
-                'surahName' => $l->surah_name,
-                'verseNum' => $l->verse_num !== null ? (int) $l->verse_num : null,
-                'action' => $l->action,
-                'actionLabel' => $l->action_label,
-            ])->all(),
+            'history' => $this->exportHistory(),
         ];
+    }
+
+    /**
+     * Chunked so a long-running installation's log table does not have to be held
+     * in memory as Eloquent models all at once.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function exportHistory(): array
+    {
+        $history = [];
+
+        ActivityLog::orderBy('id')->chunk(2000, function ($rows) use (&$history) {
+            foreach ($rows as $l) {
+                $history[] = [
+                    'loggedAt' => $l->logged_at?->toIso8601String(),
+                    'actorName' => $l->actor_name,
+                    'studentName' => $l->student_name,
+                    'studentNis' => $l->student_nis,
+                    'className' => $l->class_name,
+                    'classId' => $l->class_id,
+                    'surahName' => $l->surah_name,
+                    'verseNum' => $l->verse_num !== null ? (int) $l->verse_num : null,
+                    'action' => $l->action,
+                    'actionLabel' => $l->action_label,
+                ];
+            }
+        });
+
+        return $history;
     }
 
     /**

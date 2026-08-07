@@ -6,6 +6,7 @@ use App\Models\HafalanProgress;
 use App\Models\SchoolSetting;
 use App\Models\Student;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->user = User::factory()->create(['name' => 'Ustadz Penguji']);
@@ -278,4 +279,36 @@ test('the restore itself is recorded in the audit trail', function () {
     $log = ActivityLog::where('action', 'RESTORE_BACKUP')->first();
     expect($log)->not->toBeNull();
     expect($log->actor_name)->toBe('Ustadz Penguji');
+});
+
+// --- Export/restore limits must not contradict each other ---------------------------
+
+test('a backup whose history exceeds the old 20k ceiling still restores', function () {
+    // One log row is written per verse toggle, so a real installation crosses this
+    // quickly. Export applies no cap, so the restore ceiling has to stay above
+    // anything export can emit — otherwise the app produces backups it rejects.
+    $rows = [];
+    $now = now();
+    for ($i = 0; $i < 21000; $i++) {
+        $rows[] = [
+            'user_id' => null, 'actor_name' => 'Ustadz Penguji', 'logged_at' => $now,
+            'student_name' => 'Ahmad Fulan', 'student_nis' => '1001', 'class_name' => 'Kelas 7A',
+            'class_id' => '7A', 'surah_name' => 'Al-Mursalat', 'verse_num' => 1,
+            'action' => 'CHECKED', 'action_label' => 'Mencentang Hafalan',
+            'created_at' => $now, 'updated_at' => $now,
+        ];
+    }
+    foreach (array_chunk($rows, 1000) as $chunk) {
+        DB::table('activity_logs')->insert($chunk);
+    }
+
+    $backup = backupOf($this);
+    expect(count($backup['history']))->toBeGreaterThan(20000);
+
+    $response = $this->actingAs($this->user)
+        ->postJson('/api/hafalan/backup/restore', ['password' => 'password', 'backup' => $backup]);
+
+    $response->assertOk();
+    expect($response->json('restored.history'))->toBeGreaterThan(20000);
+    expect(ActivityLog::count())->toBeGreaterThan(20000);
 });

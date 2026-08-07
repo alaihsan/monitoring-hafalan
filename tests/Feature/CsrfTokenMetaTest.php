@@ -3,7 +3,6 @@
 use App\Models\ClassModel;
 use App\Models\Student;
 use App\Models\User;
-use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 
 /**
  * Every hafalan write is a raw fetch() that reads <meta name="csrf-token"> for its
@@ -19,7 +18,13 @@ test('the root template exposes a csrf token meta tag', function () {
     expect($response->getContent())->toMatch('/<meta name="csrf-token" content="[^"]{10,}">/');
 });
 
-test('a write using only the csrf meta token is accepted', function () {
+test('the meta tag carries the session\'s real csrf token, not an arbitrary string', function () {
+    // NOTE: Laravel's VerifyCsrfToken middleware short-circuits whenever
+    // runningUnitTests() is true, so a feature test cannot prove that a request is
+    // rejected without a token — a deliberately wrong token still returns 200.
+    // What is testable, and what actually regressed, is that the tag exists and
+    // holds the session token the frontend needs. End-to-end rejection was verified
+    // against a running server instead.
     $user = User::factory()->create();
 
     ClassModel::create([
@@ -29,20 +34,10 @@ test('a write using only the csrf meta token is accepted', function () {
         'id' => 'std_7a_1', 'nis' => '1001', 'name' => 'Ahmad', 'gender' => 'L', 'class_id' => '7A',
     ]);
 
-    // Read the token exactly the way the frontend does.
     $html = $this->actingAs($user)->get('/hafalan')->getContent();
     preg_match('/<meta name="csrf-token" content="([^"]+)">/', $html, $m);
+
     expect($m[1] ?? null)->not->toBeNull();
-
-    // Post through the real CSRF middleware, which the test suite normally skips.
-    $this->withMiddleware(VerifyCsrfToken::class);
-
-    $this->actingAs($user)
-        ->withHeader('X-CSRF-TOKEN', $m[1])
-        ->postJson('/api/hafalan/toggle-verse', [
-            'studentId' => 'std_7a_1',
-            'surahId' => 'al-mursalat',
-            'verseNum' => 1,
-        ])
-        ->assertOk();
+    expect($m[1])->toBe(csrf_token());
+    expect(strlen($m[1]))->toBe(40);
 });
