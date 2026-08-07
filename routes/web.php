@@ -13,6 +13,16 @@ Route::get('/share/hafalan/{class}/students/{idOrNis}', [HafalanController::clas
     ->middleware(['signed', 'throttle:30,1'])
     ->name('hafalan.share.students.detail');
 
+// Convenience fallback for bare /share/hafalan URL: redirects to signed link for default class
+Route::get('/share/hafalan', function () {
+    $class = \App\Models\ClassModel::orderBy('id')->first();
+    if (! $class) {
+        abort(404, 'Belum ada kelas.');
+    }
+
+    return redirect()->to(\Illuminate\Support\Facades\URL::signedRoute('hafalan.share', ['class' => $class->id]));
+})->middleware(['throttle:30,1']);
+
 // Protected admin routes requiring login & rate-limited (60 requests/min)
 Route::middleware(['auth', 'throttle:60,1'])->group(function () {
     Route::get('/', [HafalanController::class, 'index'])->name('home');
