@@ -31,8 +31,9 @@ export const ClearHistoryModal: React.FC<ClearHistoryModalProps> = ({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (isMatch) {
+            // Left open deliberately: the parent closes it once the server confirms,
+            // so a rejected password does not discard what was already typed in.
             onConfirmClearHistory(password);
-            onClose();
         }
     };
 

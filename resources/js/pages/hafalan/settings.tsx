@@ -322,6 +322,7 @@ export default function HafalanSettingsPage({
             if (data.students) {
                 setAllStudents(data.students);
             }
+            setIsClearClassModalOpen(false);
             router.reload();
             showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
         } catch (err) {
@@ -359,11 +360,7 @@ export default function HafalanSettingsPage({
             }
 
             setAllStudents([]);
-            if (typeof window !== 'undefined') {
-                localStorage.removeItem('hafalan_monitoring_students_v1');
-                localStorage.removeItem('hafalan_monitoring_progress_v1');
-                localStorage.removeItem('hafalan_monitoring_history_v1');
-            }
+            setIsClearAllModalOpen(false);
             router.reload();
             showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
         } catch (err) {
@@ -394,9 +391,7 @@ export default function HafalanSettingsPage({
                 return;
             }
 
-            if (typeof window !== 'undefined') {
-                localStorage.removeItem('hafalan_monitoring_history_v1');
-            }
+            setIsClearHistoryModalOpen(false);
             router.reload();
             showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
         } catch (err) {
