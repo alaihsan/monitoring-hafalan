@@ -80,6 +80,23 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Machine-to-machine API key
+    |--------------------------------------------------------------------------
+    |
+    | Shared secret for the read-only API in routes/api.php, sent by the client as
+    | the X-Api-Key header. Generate one with:
+    |
+    |     php artisan hafalan:api-key
+    |
+    | Leave it unset and the API refuses every request (503) rather than becoming
+    | publicly readable.
+    |
+    */
+
+    'api_key' => env('HAFALAN_API_KEY'),
+
     'limits' => [
         'nis' => 30,
         'student_name' => 150,
