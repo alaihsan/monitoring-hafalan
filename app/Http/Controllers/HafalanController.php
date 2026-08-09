@@ -112,6 +112,11 @@ class HafalanController extends Controller
         ]);
     }
 
+    public function getSharedStudentDetail(ClassModel $class, string $idOrNis)
+    {
+        return $this->studentDetailResponse($idOrNis, $class);
+    }
+
     /**
      * Issue a signed, optionally expiring public link for one class.
      */
@@ -507,10 +512,18 @@ class HafalanController extends Controller
 
     public function getStudentDetail(string $idOrNis)
     {
+        return $this->studentDetailResponse($idOrNis);
+    }
+
+    private function studentDetailResponse(string $idOrNis, ?ClassModel $sharedClass = null)
+    {
         // Resolved id-first rather than with a single orWhere, so a value that happens
         // to match one student's id and another's NIS returns a deterministic result.
-        $student = Student::with('schoolClass')->find($idOrNis)
-            ?? Student::with('schoolClass')->where('nis', $idOrNis)->first();
+        $studentQuery = Student::with('schoolClass')
+            ->when($sharedClass, fn ($query) => $query->where('class_id', $sharedClass->id));
+
+        $student = (clone $studentQuery)->find($idOrNis)
+            ?? $studentQuery->where('nis', $idOrNis)->first();
 
         if (! $student) {
             return response()->json([
