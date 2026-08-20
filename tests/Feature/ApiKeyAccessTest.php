@@ -59,6 +59,57 @@ test('an unknown student returns 404 rather than an empty success', function () 
         ->assertJsonPath('success', false);
 });
 
+test('a valid api key returns surahs catalog', function () {
+    $response = $this->withHeader('X-Api-Key', TEST_API_KEY)
+        ->getJson('/api/v1/surahs');
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'success',
+            'surahs' => [
+                '*' => ['id', 'number', 'name', 'arabicName', 'totalVerses', 'grade', 'semester'],
+            ],
+        ]);
+});
+
+test('a valid api key returns class list', function () {
+    $response = $this->withHeader('X-Api-Key', TEST_API_KEY)
+        ->getJson('/api/v1/classes');
+
+    $response->assertOk()
+        ->assertJsonStructure([
+            'success',
+            'classes' => [
+                '*' => ['id', 'name', 'grade', 'section', 'waliKelas', 'studentCount'],
+            ],
+        ]);
+});
+
+test('a valid api key returns class progress', function () {
+    $response = $this->withHeader('X-Api-Key', TEST_API_KEY)
+        ->getJson('/api/v1/classes/7A/progress');
+
+    $response->assertOk()
+        ->assertJson([
+            'success' => true,
+            'class' => [
+                'id' => '7A',
+                'name' => 'Kelas 7A',
+            ],
+            'progress' => [
+                'std_a' => [
+                    'al-mursalat' => [1, 2, 3],
+                ],
+            ],
+        ]);
+});
+
+test('unknown class progress returns 404', function () {
+    $this->withHeader('X-Api-Key', TEST_API_KEY)
+        ->getJson('/api/v1/classes/UNKNOWN/progress')
+        ->assertNotFound();
+});
+
 // --- Key enforcement ------------------------------------------------------------------
 
 test('a request without an api key is rejected', function () {

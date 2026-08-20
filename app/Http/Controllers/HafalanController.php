@@ -510,6 +510,51 @@ class HafalanController extends Controller
         ]);
     }
 
+    public function getSurahsCatalog()
+    {
+        return response()->json([
+            'success' => true,
+            'surahs' => SurahCatalog::forResponse(),
+        ]);
+    }
+
+    public function getClasses()
+    {
+        return response()->json([
+            'success' => true,
+            'classes' => $this->getClassesData(),
+        ]);
+    }
+
+    public function getClassProgress(string $classId)
+    {
+        $class = ClassModel::find($classId);
+
+        if (! $class) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kelas tidak ditemukan.',
+            ], 404);
+        }
+
+        $students = Student::where('class_id', $class->id)->get();
+        $studentIds = $students->pluck('id')->all();
+
+        return response()->json([
+            'success' => true,
+            'class' => [
+                'id' => $class->id,
+                'name' => $class->name,
+                'grade' => (int) $class->grade,
+                'section' => $class->section,
+                'waliKelas' => $class->wali_kelas ?? '',
+                'studentCount' => $students->count(),
+            ],
+            'students' => $this->mapStudents($students),
+            'progress' => $this->getProgressData($studentIds),
+        ]);
+    }
+
     public function getStudentDetail(string $idOrNis)
     {
         return $this->studentDetailResponse($idOrNis);

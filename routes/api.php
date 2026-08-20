@@ -18,6 +18,15 @@ use Illuminate\Support\Facades\Route;
 |
 */
 Route::middleware(['apikey', 'throttle:60,1'])->prefix('v1')->group(function () {
+    Route::get('/surahs', [HafalanController::class, 'getSurahsCatalog'])
+        ->name('api.v1.surahs');
+
+    Route::get('/classes', [HafalanController::class, 'getClasses'])
+        ->name('api.v1.classes');
+
+    Route::get('/classes/{class}/progress', [HafalanController::class, 'getClassProgress'])
+        ->name('api.v1.classes.progress');
+
     Route::get('/students/{idOrNis}', [HafalanController::class, 'getStudentDetail'])
         ->name('api.v1.students.detail');
 });
