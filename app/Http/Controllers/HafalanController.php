@@ -515,7 +515,7 @@ class HafalanController extends Controller
         return $this->studentDetailResponse($idOrNis);
     }
 
-    private function studentDetailResponse(string $idOrNis, ?ClassModel $sharedClass = null)
+    protected function studentDetailResponse(string $idOrNis, ?ClassModel $sharedClass = null)
     {
         // Resolved id-first rather than with a single orWhere, so a value that happens
         // to match one student's id and another's NIS returns a deterministic result.
@@ -638,7 +638,7 @@ class HafalanController extends Controller
      *
      * @param  array<string, mixed>  $attributes
      */
-    private function logActivity(array $attributes): void
+    protected function logActivity(array $attributes): void
     {
         ActivityLog::create($attributes + [
             // Records who acted; previously the trail could not attribute a data wipe
@@ -651,7 +651,7 @@ class HafalanController extends Controller
         ]);
     }
 
-    private function getClassesData(): array
+    protected function getClassesData(): array
     {
         return $this->mapClasses(ClassModel::withCount('students')->orderBy('id')->get());
     }
@@ -659,7 +659,7 @@ class HafalanController extends Controller
     /**
      * @param  Collection<int, ClassModel>  $classes
      */
-    private function mapClasses($classes): array
+    protected function mapClasses($classes): array
     {
         return $classes->map(function ($c) {
             return [
@@ -673,7 +673,7 @@ class HafalanController extends Controller
         })->values()->toArray();
     }
 
-    private function getStudentsData(): array
+    protected function getStudentsData(): array
     {
         return $this->mapStudents(Student::all());
     }
@@ -681,7 +681,7 @@ class HafalanController extends Controller
     /**
      * @param  Collection<int, Student>  $students
      */
-    private function mapStudents($students): array
+    protected function mapStudents($students): array
     {
         return $students->map(function ($s) {
             return [
@@ -697,7 +697,7 @@ class HafalanController extends Controller
     /**
      * @param  array<int, string>|null  $studentIds  Limit to these students, or all when null.
      */
-    private function getProgressData(?array $studentIds = null): array
+    protected function getProgressData(?array $studentIds = null): array
     {
         $records = HafalanProgress::when(
             $studentIds !== null,
@@ -718,7 +718,7 @@ class HafalanController extends Controller
         return $progress;
     }
 
-    private function getSettingsData(): array
+    protected function getSettingsData(): array
     {
         $settings = SchoolSetting::all()->pluck('value', 'key')->toArray();
 
@@ -728,7 +728,7 @@ class HafalanController extends Controller
         ];
     }
 
-    private function getLogsData(): array
+    protected function getLogsData(): array
     {
         return ActivityLog::with('user:id,name')
             ->orderByDesc('logged_at')

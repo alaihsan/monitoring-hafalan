@@ -69,7 +69,13 @@ export default function HafalanMonitoringPage({
 
     // Derived Selected Class & Surah
     const currentClass = React.useMemo(() => {
-        return classes.find((c) => c.id === currentClassId) || classes[0];
+        return classes.find((c) => c.id === currentClassId) || classes[0] || {
+            id: '7A',
+            name: 'Kelas 7A',
+            grade: 7,
+            section: 'A',
+            waliKelas: '',
+        };
     }, [classes, currentClassId]);
 
     const currentSurah = React.useMemo(() => {

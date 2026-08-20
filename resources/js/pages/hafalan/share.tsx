@@ -35,7 +35,13 @@ export default function HafalanSharePage({
     const [selectedSemester, setSelectedSemester] = React.useState<number>(1);
     const [isPrintModalOpen, setIsPrintModalOpen] = React.useState<boolean>(false);
 
-    const currentClass = shareClass;
+    const currentClass = shareClass || {
+        id: '7A',
+        name: 'Kelas 7A',
+        grade: 7,
+        section: 'A',
+        waliKelas: '',
+    };
 
     const currentSurah = React.useMemo(() => {
         return getSurahForGradeAndSemester(currentClass.grade, selectedSemester);
