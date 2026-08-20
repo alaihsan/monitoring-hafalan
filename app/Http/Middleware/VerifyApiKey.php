@@ -34,7 +34,7 @@ class VerifyApiKey
             ], 503);
         }
 
-        $provided = (string) ($request->header('X-Api-Key') ?? '');
+        $provided = (string) ($request->header('X-Api-Key') ?? $request->query('api_key') ?? $request->query('key') ?? '');
 
         // hash_equals compares in constant time so the key cannot be recovered by
         // measuring how long a wrong guess takes.

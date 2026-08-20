@@ -52,6 +52,12 @@ test('the student can also be fetched by internal id', function () {
         ->assertJsonPath('student.nis', '1001');
 });
 
+test('a valid api key can also be passed as query parameter in the url', function () {
+    $this->getJson('/api/v1/students/1001?api_key='.TEST_API_KEY)
+        ->assertOk()
+        ->assertJsonPath('student.nis', '1001');
+});
+
 test('an unknown student returns 404 rather than an empty success', function () {
     $this->withHeader('X-Api-Key', TEST_API_KEY)
         ->getJson('/api/v1/students/9999')
