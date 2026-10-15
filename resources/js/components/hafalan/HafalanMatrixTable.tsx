@@ -68,7 +68,7 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
             (verseStatusFilter === 'MEMORIZED' ? studentVerses.includes(verseFilter) : !studentVerses.includes(verseFilter));
 
         return matchesSearch && matchesStatus && matchesGender && matchesVerse;
-    });
+    }).slice().sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
 
     const getVerseStats = (verseNum: number) => {
         let count = 0;

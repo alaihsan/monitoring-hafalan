@@ -117,3 +117,20 @@ test('the backup export is built from the database, not the browser cache', func
 test('the backup export requires authentication', function () {
     $this->getJson('/api/hafalan/export')->assertUnauthorized();
 });
+
+test('students are automatically sorted A-Z by name', function () {
+    Student::forceCreate([
+        'id' => 'std_7a_z', 'nis' => '1002', 'name' => 'Zahra', 'gender' => 'P', 'class_id' => '7A',
+    ]);
+    Student::forceCreate([
+        'id' => 'std_7a_a', 'nis' => '1003', 'name' => 'Ahmad', 'gender' => 'L', 'class_id' => '7A',
+    ]);
+
+    $this->actingAs($this->user)
+        ->get('/hafalan?class=7A')
+        ->assertInertia(fn ($page) => $page
+            ->where('initialStudents.0.name', 'Ahmad')
+            ->where('initialStudents.1.name', 'Siswa 7A')
+            ->where('initialStudents.2.name', 'Zahra')
+        );
+});

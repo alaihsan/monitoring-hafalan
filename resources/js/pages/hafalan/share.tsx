@@ -48,7 +48,10 @@ export default function HafalanSharePage({
     }, [currentClass, selectedSemester]);
 
     const currentClassStudents = React.useMemo(() => {
-        return students.filter((s) => s.classId === currentClass.id);
+        return students
+            .filter((s) => s.classId === currentClass.id)
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
     }, [students, currentClass]);
 
     const { completedCount, avgProgress } = React.useMemo(() => {

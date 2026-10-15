@@ -15,8 +15,7 @@ import { DeleteStudentModal } from '@/components/hafalan/DeleteStudentModal';
 import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
 import { ClearHistoryModal } from '@/components/hafalan/ClearHistoryModal';
-import { RestoreBackupModal, BackupSummary } from '@/components/hafalan/RestoreBackupModal';
-import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle, Search, X } from 'lucide-react';
+import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -199,7 +198,10 @@ export default function HafalanSettingsPage({
 
     // Filter students for active CRUD class
     const crudClassStudents = React.useMemo(() => {
-        return allStudents.filter((s) => s.classId === selectedCrudClassId);
+        return allStudents
+            .filter((s) => s.classId === selectedCrudClassId)
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
     }, [allStudents, selectedCrudClassId]);
 
     // Apply the search / gender filters on top of the class scope.

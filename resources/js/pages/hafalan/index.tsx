@@ -85,10 +85,11 @@ export default function HafalanMonitoringPage({
         return getSurahForGradeAndSemester(currentClass.grade, selectedSemester);
     }, [currentClass, selectedSemester, customSurah]);
 
-    // Current Class Students
-    // Already scoped server-side; filtered defensively in case props lag a reload.
     const currentClassStudents = React.useMemo(() => {
-        return students.filter((s) => s.classId === currentClass?.id);
+        return students
+            .filter((s) => s.classId === currentClass?.id)
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name, 'id', { sensitivity: 'base' }));
     }, [students, currentClass]);
 
     // Calculate Class Progress Metrics

@@ -59,7 +59,7 @@ class HafalanController extends Controller
         $currentClass = $classes->firstWhere('id', $request->query('class')) ?? $classes->first();
 
         $students = $currentClass
-            ? Student::where('class_id', $currentClass->id)->get()
+            ? Student::where('class_id', $currentClass->id)->orderBy('name', 'asc')->get()
             : new Collection;
 
         return Inertia::render('hafalan/index', [
@@ -96,7 +96,7 @@ class HafalanController extends Controller
      */
     public function share(ClassModel $class): Response
     {
-        $students = Student::where('class_id', $class->id)->get();
+        $students = Student::where('class_id', $class->id)->orderBy('name', 'asc')->get();
 
         return Inertia::render('hafalan/share', [
             'shareClass' => [
@@ -537,7 +537,7 @@ class HafalanController extends Controller
             ], 404);
         }
 
-        $students = Student::where('class_id', $class->id)->get();
+        $students = Student::where('class_id', $class->id)->orderBy('name', 'asc')->get();
         $studentIds = $students->pluck('id')->all();
 
         return response()->json([
@@ -720,7 +720,7 @@ class HafalanController extends Controller
 
     protected function getStudentsData(): array
     {
-        return $this->mapStudents(Student::all());
+        return $this->mapStudents(Student::orderBy('name', 'asc')->get());
     }
 
     /**
