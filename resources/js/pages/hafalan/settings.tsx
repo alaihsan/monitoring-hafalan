@@ -16,7 +16,7 @@ import { ClearClassModal } from '@/components/hafalan/ClearClassModal';
 import { ClearAllDataModal } from '@/components/hafalan/ClearAllDataModal';
 import { ClearHistoryModal } from '@/components/hafalan/ClearHistoryModal';
 import { RestoreBackupModal, BackupSummary } from '@/components/hafalan/RestoreBackupModal';
-import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle } from 'lucide-react';
+import { Building2, UserCheck, Download, Upload, Save, CheckCircle2, UserPlus, ClipboardList, FileSpreadsheet, Plus, Edit2, Trash2, Users, AlertCircle, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -49,7 +49,12 @@ export default function HafalanSettingsPage({
 
     const [classes, setClasses] = React.useState<ClassInfo[]>(initialClasses || CLASSES);
     const [allStudents, setAllStudents] = React.useState<Student[]>(initialStudents || []);
-    const [savedNotification, setSavedNotification] = React.useState<string | null>(null);
+    const [savedNotification, setSavedNotification] = React.useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+    const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // Student list filters (Kelola Murid table)
+    const [studentSearch, setStudentSearch] = React.useState<string>('');
+    const [studentGenderFilter, setStudentGenderFilter] = React.useState<'ALL' | 'L' | 'P'>('ALL');
 
     // Selected Class for CRUD & Import
     const [selectedCrudClassId, setSelectedCrudClassId] = React.useState<string>('7A');
@@ -90,16 +95,34 @@ export default function HafalanSettingsPage({
         setAllStudents(initialStudents ?? []);
     }, [initialSettings, initialClasses, initialStudents]);
 
-    const showToast = (msg: string) => {
-        setSavedNotification(msg);
-        setTimeout(() => setSavedNotification(null), 4000);
+    const showToast = (message: string, tone: 'success' | 'error' = 'success') => {
+        if (toastTimerRef.current) {
+            clearTimeout(toastTimerRef.current);
+        }
+        setSavedNotification({ message, tone });
+        toastTimerRef.current = setTimeout(() => setSavedNotification(null), tone === 'error' ? 8000 : 4000);
     };
 
-    // Surfaces the server's validation message instead of silently swallowing a 422.
+    // Surfaces the server's validation message instead of silently swallowing a 422,
+    // and turns the common hosting failures into an actionable hint.
     const reportApiError = async (res: Response, fallback: string) => {
         const problem = await res.json().catch(() => null);
         const firstError = problem?.errors ? Object.values(problem.errors)[0] : null;
-        showToast(Array.isArray(firstError) && firstError[0] ? String(firstError[0]) : fallback);
+
+        if (Array.isArray(firstError) && firstError[0]) {
+            showToast(String(firstError[0]), 'error');
+            return;
+        }
+
+        const hints: Record<number, string> = {
+            401: 'Sesi login berakhir. Silakan login ulang.',
+            404: 'Alamat API tidak ditemukan di server (HTTP 404). Periksa konfigurasi APP_URL / .htaccess di hosting.',
+            419: 'Sesi kedaluwarsa (HTTP 419). Muat ulang halaman lalu coba lagi.',
+            429: 'Terlalu banyak permintaan. Tunggu sebentar lalu coba lagi.',
+            500: 'Terjadi kesalahan di server (HTTP 500). Pastikan migrasi database sudah dijalankan; cek storage/logs/laravel.log.',
+        };
+
+        showToast(hints[res.status] ?? problem?.message ?? fallback, 'error');
     };
 
     const currentCrudClass = classes.find(c => c.id === selectedCrudClassId);
@@ -118,6 +141,11 @@ export default function HafalanSettingsPage({
                 },
                 body: JSON.stringify(schoolSettings),
             });
+            if (!res.ok) {
+                await reportApiError(res, `Gagal menyimpan pengaturan sekolah (HTTP ${res.status}).`);
+                return;
+            }
+
             const data = await res.json();
             if (data.success && data.settings) {
                 setSchoolSettingsState(data.settings);
@@ -125,6 +153,8 @@ export default function HafalanSettingsPage({
             }
         } catch (err) {
             console.error('Failed to sync school settings to MySQL', err);
+            showToast('Gagal menghubungi server. Pengaturan tidak disimpan.', 'error');
+            return;
         }
 
         showToast('Pengaturan Sekolah & Guru Mapel berhasil disimpan!');
@@ -148,6 +178,11 @@ export default function HafalanSettingsPage({
                 },
                 body: JSON.stringify({ classes }),
             });
+            if (!res.ok) {
+                await reportApiError(res, `Gagal menyimpan wali kelas (HTTP ${res.status}).`);
+                return;
+            }
+
             const data = await res.json();
             if (data.success && data.classes) {
                 setClasses(data.classes);
@@ -155,6 +190,8 @@ export default function HafalanSettingsPage({
             }
         } catch (err) {
             console.error('Failed to sync wali kelas to MySQL', err);
+            showToast('Gagal menghubungi server. Wali kelas tidak disimpan.', 'error');
+            return;
         }
 
         showToast('Daftar Nama Wali Kelas 12 Rombel berhasil disimpan!');
@@ -165,6 +202,18 @@ export default function HafalanSettingsPage({
         return allStudents.filter((s) => s.classId === selectedCrudClassId);
     }, [allStudents, selectedCrudClassId]);
 
+    // Apply the search / gender filters on top of the class scope.
+    const filteredCrudStudents = React.useMemo(() => {
+        const query = studentSearch.trim().toLowerCase();
+
+        return crudClassStudents.filter((s) => {
+            const matchesSearch = !query || s.name.toLowerCase().includes(query) || s.nis.toLowerCase().includes(query);
+            const matchesGender = studentGenderFilter === 'ALL' || s.gender === studentGenderFilter;
+
+            return matchesSearch && matchesGender;
+        });
+    }, [crudClassStudents, studentSearch, studentGenderFilter]);
+
     // Student CRUD Handlers
     const handleAddStudent = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -172,7 +221,7 @@ export default function HafalanSettingsPage({
         // No fabricated values: a blank NIS used to be filled with a made-up number
         // and gender was always hard-coded to 'L'.
         if (!newName.trim() || !newNis.trim()) {
-            showToast('NIS dan nama murid wajib diisi.');
+            showToast('NIS dan nama murid wajib diisi.', 'error');
             return;
         }
 
@@ -208,7 +257,7 @@ export default function HafalanSettingsPage({
             showToast('Murid baru berhasil ditambahkan!');
         } catch (err) {
             console.error('Failed to add student', err);
-            showToast('Gagal menghubungi server. Murid tidak ditambahkan.');
+            showToast('Gagal menghubungi server. Murid tidak ditambahkan.', 'error');
         }
     };
 
@@ -221,7 +270,7 @@ export default function HafalanSettingsPage({
 
     const handleSaveEditStudent = async (studentId: string) => {
         if (!editName.trim() || !editNis.trim()) {
-            showToast('NIS dan nama murid wajib diisi.');
+            showToast('NIS dan nama murid wajib diisi.', 'error');
             return;
         }
 
@@ -255,7 +304,7 @@ export default function HafalanSettingsPage({
             showToast('Data murid berhasil diperbarui!');
         } catch (err) {
             console.error('Failed to update student', err);
-            showToast('Gagal menghubungi server. Data tidak diperbarui.');
+            showToast('Gagal menghubungi server. Data tidak diperbarui.', 'error');
         }
     };
 
@@ -285,7 +334,7 @@ export default function HafalanSettingsPage({
             showToast('Data murid berhasil dihapus!');
         } catch (err) {
             console.error('Failed to delete student', err);
-            showToast('Gagal menghubungi server. Murid tidak dihapus.');
+            showToast('Gagal menghubungi server. Murid tidak dihapus.', 'error');
         }
     };
 
@@ -308,14 +357,15 @@ export default function HafalanSettingsPage({
                 showToast(
                     res.status === 422
                         ? 'Password salah. Data tidak dihapus.'
-                        : `Gagal menghapus data (HTTP ${res.status}).`
+                        : `Gagal menghapus data (HTTP ${res.status}).`,
+                    'error'
                 );
                 return;
             }
 
             const data = await res.json();
             if (!data.success) {
-                showToast('Gagal menghapus data kelas.');
+                showToast('Gagal menghapus data kelas.', 'error');
                 return;
             }
 
@@ -327,7 +377,7 @@ export default function HafalanSettingsPage({
             showToast(`Seluruh data siswa & riwayat hafalan ${currentClassName} berhasil dihapus!`);
         } catch (err) {
             console.error('Failed to clear class data', err);
-            showToast('Gagal menghubungi server. Data tidak dihapus.');
+            showToast('Gagal menghubungi server. Data tidak dihapus.', 'error');
         }
     };
 
@@ -348,14 +398,15 @@ export default function HafalanSettingsPage({
                 showToast(
                     res.status === 422
                         ? 'Password salah. Data tidak direset.'
-                        : `Gagal mereset data (HTTP ${res.status}).`
+                        : `Gagal mereset data (HTTP ${res.status}).`,
+                    'error'
                 );
                 return;
             }
 
             const data = await res.json();
             if (!data.success) {
-                showToast('Gagal mereset data aplikasi.');
+                showToast('Gagal mereset data aplikasi.', 'error');
                 return;
             }
 
@@ -365,7 +416,7 @@ export default function HafalanSettingsPage({
             showToast('Seluruh data aplikasi (murid & riwayat hafalan) berhasil direset bersih!');
         } catch (err) {
             console.error('Failed to reset all data', err);
-            showToast('Gagal menghubungi server. Data tidak direset.');
+            showToast('Gagal menghubungi server. Data tidak direset.', 'error');
         }
     };
 
@@ -386,7 +437,8 @@ export default function HafalanSettingsPage({
                 showToast(
                     res.status === 422
                         ? 'Password salah. Riwayat tidak dihapus.'
-                        : `Gagal membersihkan riwayat (HTTP ${res.status}).`
+                        : `Gagal membersihkan riwayat (HTTP ${res.status}).`,
+                    'error'
                 );
                 return;
             }
@@ -396,7 +448,7 @@ export default function HafalanSettingsPage({
             showToast('Seluruh riwayat aktivitas log berhasil dibersihkan!');
         } catch (err) {
             console.error('Failed to clear activity history log', err);
-            showToast('Gagal menghubungi server. Riwayat tidak dihapus.');
+            showToast('Gagal menghubungi server. Riwayat tidak dihapus.', 'error');
         }
     };
 
@@ -427,14 +479,14 @@ export default function HafalanSettingsPage({
         const invalidRows = parsedPreview.filter((r) => r.issues.length > 0);
 
         if (parsedPreview.length === 0) {
-            showToast('Tidak ada data murid yang siap diimpor.');
+            showToast('Tidak ada data murid yang siap diimpor.', 'error');
             return;
         }
 
         // Rows are never imported partially-guessed: every row must carry a real NIS,
         // name and gender before anything is sent.
         if (invalidRows.length > 0) {
-            showToast(`${invalidRows.length} baris belum lengkap. Perbaiki dulu sebelum impor.`);
+            showToast(`${invalidRows.length} baris belum lengkap. Perbaiki dulu sebelum impor.`, 'error');
             return;
         }
 
@@ -463,14 +515,15 @@ export default function HafalanSettingsPage({
                 showToast(
                     Array.isArray(firstError) && firstError[0]
                         ? String(firstError[0])
-                        : `Gagal mengimpor data (HTTP ${res.status}).`
+                        : `Gagal mengimpor data (HTTP ${res.status}).`,
+                    'error'
                 );
                 return;
             }
 
             const data = await res.json();
             if (!data.success) {
-                showToast('Gagal mengimpor data murid.');
+                showToast('Gagal mengimpor data murid.', 'error');
                 return;
             }
 
@@ -481,7 +534,7 @@ export default function HafalanSettingsPage({
             showToast(`Berhasil mengimpor ${parsedPreview.length} murid ke ${currentClassName}!`);
         } catch (err) {
             console.error('Failed to import students', err);
-            showToast('Gagal menghubungi server. Data tidak diimpor.');
+            showToast('Gagal menghubungi server. Data tidak diimpor.', 'error');
         }
     };
 
@@ -491,7 +544,7 @@ export default function HafalanSettingsPage({
         try {
             const res = await fetch('/api/hafalan/export', { headers: { Accept: 'application/json' } });
             if (!res.ok) {
-                showToast(`Gagal membuat backup (HTTP ${res.status}).`);
+                showToast(`Gagal membuat backup (HTTP ${res.status}).`, 'error');
                 return;
             }
 
@@ -505,7 +558,7 @@ export default function HafalanSettingsPage({
             URL.revokeObjectURL(url);
         } catch (err) {
             console.error('Failed to export data', err);
-            showToast('Gagal menghubungi server. Backup tidak dibuat.');
+            showToast('Gagal menghubungi server. Backup tidak dibuat.', 'error');
         }
     };
 
@@ -524,13 +577,13 @@ export default function HafalanSettingsPage({
             try {
                 parsed = JSON.parse(event.target?.result as string);
             } catch {
-                showToast('Gagal membaca file JSON. Format tidak valid.');
+                showToast('Gagal membaca file JSON. Format tidak valid.', 'error');
                 return;
             }
 
             const students = Array.isArray(parsed?.students) ? parsed.students : null;
             if (!students) {
-                showToast('File ini bukan backup Monitoring Hafalan (tidak memuat data murid).');
+                showToast('File ini bukan backup Monitoring Hafalan (tidak memuat data murid).', 'error');
                 return;
             }
 
@@ -589,7 +642,7 @@ export default function HafalanSettingsPage({
             );
         } catch (err) {
             console.error('Failed to restore backup', err);
-            showToast('Gagal menghubungi server. Data tidak diubah.');
+            showToast('Gagal menghubungi server. Data tidak diubah.', 'error');
         }
     };
 
@@ -608,10 +661,31 @@ export default function HafalanSettingsPage({
                     </div>
                 </div>
 
+                {/* Fixed so the message is visible no matter where the user has scrolled;
+                    it used to sit at the top of the page, hiding errors from the student form. */}
                 {savedNotification && (
-                    <div className="flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-4 text-sm font-bold text-emerald-700 dark:text-emerald-300 animate-in fade-in">
-                        <CheckCircle2 className="size-5 text-emerald-600" />
-                        {savedNotification}
+                    <div
+                        role={savedNotification.tone === 'error' ? 'alert' : 'status'}
+                        className={`fixed bottom-6 right-6 z-50 flex max-w-md items-start gap-2 rounded-xl border p-4 text-sm font-bold shadow-lg animate-in fade-in slide-in-from-bottom-2 ${
+                            savedNotification.tone === 'error'
+                                ? 'bg-red-50 border-red-300 text-red-700 dark:bg-red-950 dark:border-red-800 dark:text-red-300'
+                                : 'bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-300'
+                        }`}
+                    >
+                        {savedNotification.tone === 'error' ? (
+                            <AlertCircle className="size-5 shrink-0 text-red-600" />
+                        ) : (
+                            <CheckCircle2 className="size-5 shrink-0 text-emerald-600" />
+                        )}
+                        <span className="flex-1">{savedNotification.message}</span>
+                        <button
+                            type="button"
+                            onClick={() => setSavedNotification(null)}
+                            className="shrink-0 opacity-60 hover:opacity-100"
+                            aria-label="Tutup notifikasi"
+                        >
+                            <X className="size-4" />
+                        </button>
                     </div>
                 )}
 
@@ -737,7 +811,37 @@ export default function HafalanSettingsPage({
                     {/* Interactive CRUD Table for Active Class */}
                     <div className="space-y-3">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold text-foreground">
-                            <span>Daftar Murid {currentClassName} ({crudClassStudents.length} Siswa):</span>
+                            <span>
+                                Daftar Murid {currentClassName} (
+                                {filteredCrudStudents.length === crudClassStudents.length
+                                    ? `${crudClassStudents.length} Siswa`
+                                    : `${filteredCrudStudents.length} dari ${crudClassStudents.length} Siswa`}
+                                ):
+                            </span>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="relative">
+                                    <Search className="text-muted-foreground absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2" />
+                                    <Input
+                                        id="student-list-search"
+                                        type="search"
+                                        value={studentSearch}
+                                        onChange={(e) => setStudentSearch(e.target.value)}
+                                        placeholder="Cari nama / NIS..."
+                                        className="bg-background h-8 w-52 pl-8 text-xs font-medium"
+                                    />
+                                </div>
+                                <select
+                                    id="student-list-gender-filter"
+                                    value={studentGenderFilter}
+                                    onChange={(e) => setStudentGenderFilter(e.target.value as 'ALL' | 'L' | 'P')}
+                                    className="h-8 rounded-md border border-input bg-background px-2 text-xs font-semibold"
+                                    aria-label="Filter jenis kelamin"
+                                >
+                                    <option value="ALL">Semua L/P</option>
+                                    <option value="L">Laki-laki</option>
+                                    <option value="P">Perempuan</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div className="max-h-64 overflow-y-auto rounded-xl border border-border bg-background">
@@ -757,8 +861,14 @@ export default function HafalanSettingsPage({
                                                 Belum ada data murid di {currentClassName}. Gunakan form di atas atau modul impor di bawah.
                                             </td>
                                         </tr>
+                                    ) : filteredCrudStudents.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="text-center py-6 text-muted-foreground">
+                                                Tidak ada murid yang cocok dengan filter.
+                                            </td>
+                                        </tr>
                                     ) : (
-                                        crudClassStudents.map((st, idx) => {
+                                        filteredCrudStudents.map((st, idx) => {
                                             const isEditing = editingStudentId === st.id;
                                             return (
                                                 <tr key={st.id} className="hover:bg-muted/40 transition-colors">

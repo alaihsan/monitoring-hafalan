@@ -1,6 +1,6 @@
 import React from 'react';
 import { Student, Surah, ProgressData } from '@/data/hafalan-data';
-import { Check, Search, Filter, Award } from 'lucide-react';
+import { Check, Search, Filter, Award, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 
@@ -22,26 +22,52 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
     onToggleColumnVerse,
 }) => {
     const [searchQuery, setSearchQuery] = React.useState('');
-    const [statusFilter, setStatusFilter] = React.useState<'ALL' | 'COMPLETED' | 'IN_PROGRESS'>('ALL');
+    const [statusFilter, setStatusFilter] = React.useState<'ALL' | 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED'>('ALL');
+    const [genderFilter, setGenderFilter] = React.useState<'ALL' | 'L' | 'P'>('ALL');
+    const [verseFilter, setVerseFilter] = React.useState<number | null>(null);
+    const [verseStatusFilter, setVerseStatusFilter] = React.useState<'MEMORIZED' | 'NOT_MEMORIZED'>('NOT_MEMORIZED');
 
     const totalVerses = surah.totalVerses;
     const verseArray = Array.from({ length: totalVerses }, (_, i) => i + 1);
 
+    // A verse filter from a previous surah may point past the end of the new one.
+    React.useEffect(() => {
+        if (verseFilter !== null && verseFilter > totalVerses) {
+            setVerseFilter(null);
+        }
+    }, [totalVerses, verseFilter]);
+
+    const hasActiveFilter = searchQuery !== '' || statusFilter !== 'ALL' || genderFilter !== 'ALL' || verseFilter !== null;
+
+    const resetFilters = () => {
+        setSearchQuery('');
+        setStatusFilter('ALL');
+        setGenderFilter('ALL');
+        setVerseFilter(null);
+    };
+
     // Filter students
+    const query = searchQuery.trim().toLowerCase();
     const filteredStudents = students.filter((student) => {
-        const matchesSearch =
-            student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            student.nis.includes(searchQuery);
+        const matchesSearch = !query || student.name.toLowerCase().includes(query) || student.nis.toLowerCase().includes(query);
 
         const studentVerses = progress[student.id]?.[surah.id] || [];
         const isCompleted = studentVerses.length === totalVerses;
+        const isNotStarted = studentVerses.length === 0;
 
         const matchesStatus =
             statusFilter === 'ALL' ||
             (statusFilter === 'COMPLETED' && isCompleted) ||
-            (statusFilter === 'IN_PROGRESS' && !isCompleted);
+            (statusFilter === 'NOT_STARTED' && isNotStarted) ||
+            (statusFilter === 'IN_PROGRESS' && !isCompleted && !isNotStarted);
 
-        return matchesSearch && matchesStatus;
+        const matchesGender = genderFilter === 'ALL' || student.gender === genderFilter;
+
+        const matchesVerse =
+            verseFilter === null ||
+            (verseStatusFilter === 'MEMORIZED' ? studentVerses.includes(verseFilter) : !studentVerses.includes(verseFilter));
+
+        return matchesSearch && matchesStatus && matchesGender && matchesVerse;
     });
 
     const getVerseStats = (verseNum: number) => {
@@ -65,8 +91,9 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
                 <div className="relative min-w-[240px] flex-1">
                     <Search className="text-muted-foreground absolute left-3 top-1/2 size-4 -translate-y-1/2" />
                     <Input
+                        id="matrix-search"
                         type="text"
-                        placeholder="Cari nama murid..."
+                        placeholder="Cari nama murid / NIS..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="bg-background pl-9 text-xs"
@@ -78,24 +105,85 @@ export const HafalanMatrixTable: React.FC<HafalanMatrixTableProps> = ({
                     <div className="flex items-center gap-1 bg-background border border-border rounded-lg p-1 text-xs">
                         <Filter className="size-3 text-muted-foreground ml-1" />
                         <button
+                            type="button"
                             onClick={() => setStatusFilter('ALL')}
                             className={`px-2.5 py-1 rounded font-medium ${statusFilter === 'ALL' ? 'bg-muted-foreground/20 text-foreground' : 'text-muted-foreground'}`}
                         >
                             Semua ({students.length})
                         </button>
                         <button
-                            onClick={() => setStatusFilter('COMPLETED')}
-                            className={`px-2.5 py-1 rounded font-medium ${statusFilter === 'COMPLETED' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+                            type="button"
+                            onClick={() => setStatusFilter('NOT_STARTED')}
+                            className={`px-2.5 py-1 rounded font-medium ${statusFilter === 'NOT_STARTED' ? 'bg-slate-500 text-white' : 'text-muted-foreground'}`}
                         >
-                            Tuntas
+                            Belum Mulai
                         </button>
                         <button
+                            type="button"
                             onClick={() => setStatusFilter('IN_PROGRESS')}
                             className={`px-2.5 py-1 rounded font-medium ${statusFilter === 'IN_PROGRESS' ? 'bg-amber-600 text-white' : 'text-muted-foreground'}`}
                         >
                             Proses
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => setStatusFilter('COMPLETED')}
+                            className={`px-2.5 py-1 rounded font-medium ${statusFilter === 'COMPLETED' ? 'bg-emerald-600 text-white' : 'text-muted-foreground'}`}
+                        >
+                            Tuntas
+                        </button>
                     </div>
+
+                    <select
+                        id="matrix-gender-filter"
+                        value={genderFilter}
+                        onChange={(e) => setGenderFilter(e.target.value as 'ALL' | 'L' | 'P')}
+                        className="h-8 rounded-lg border border-border bg-background px-2 text-xs font-medium"
+                        aria-label="Filter jenis kelamin"
+                    >
+                        <option value="ALL">Semua L/P</option>
+                        <option value="L">Laki-laki</option>
+                        <option value="P">Perempuan</option>
+                    </select>
+
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 text-xs">
+                        <select
+                            id="matrix-verse-filter"
+                            value={verseFilter ?? ''}
+                            onChange={(e) => setVerseFilter(e.target.value === '' ? null : Number(e.target.value))}
+                            className="h-7 rounded bg-transparent px-1.5 font-medium"
+                            aria-label="Filter per ayat"
+                        >
+                            <option value="">Semua Ayat</option>
+                            {verseArray.map((vNum) => (
+                                <option key={vNum} value={vNum}>
+                                    Ayat {vNum}
+                                </option>
+                            ))}
+                        </select>
+                        {verseFilter !== null && (
+                            <select
+                                id="matrix-verse-status-filter"
+                                value={verseStatusFilter}
+                                onChange={(e) => setVerseStatusFilter(e.target.value as 'MEMORIZED' | 'NOT_MEMORIZED')}
+                                className="h-7 rounded bg-transparent px-1.5 font-medium"
+                                aria-label="Status ayat"
+                            >
+                                <option value="NOT_MEMORIZED">Belum Hafal</option>
+                                <option value="MEMORIZED">Sudah Hafal</option>
+                            </select>
+                        )}
+                    </div>
+
+                    {hasActiveFilter && (
+                        <button
+                            type="button"
+                            onClick={resetFilters}
+                            className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                            <X className="size-3" /> Reset
+                        </button>
+                    )}
                 </div>
             </div>
 
